@@ -1,0 +1,23 @@
+# Node-specific settings for high_viscosity_liquid_weighing
+#
+# node_name: unique name used by the workcell and location manager to identify this node.
+# node_type: "device" for physical hardware nodes.
+#
+# devices: list of device section names (from devices/devices.settings.yaml)
+#          that this node uses. Only the listed devices will be loaded.
+# Device connection settings (port, baud_rate, etc.) are in devices/devices.settings.yaml.
+#
+# interface_type: global default interface type for all devices.
+#   "fake" — use simulated interfaces (no hardware required)
+#   "real" — use real hardware interfaces
+#   Per-device overrides can be set via _interface_type in devices.settings.yaml.
+
+node_name: high_viscosity_liquid_weighing
+node_type: device
+
+devices:
+  - balance
+  - high_viscosity_dispenser
+
+interface_type: fake
+

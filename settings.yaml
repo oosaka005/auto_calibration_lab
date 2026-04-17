@@ -1,0 +1,48 @@
+# Settings for auto_calibration_lab
+#
+# This file is the central configuration for all MADSci managers and nodes.
+# Safe to commit to git. Put secrets and environment-specific overrides in .env.
+# MADSci discovers this file automatically by walking up from the working directory.
+
+# Lab Manager
+lab_server_url: http://localhost:8000/
+lab_manager_name: "Auto Calibration Lab"
+lab_manager_description: "Gravimetric dispensing and auto-calibration lab"
+
+# Event Manager
+event_server_url: http://localhost:8001/
+event_manager_name: "Auto Calibration Event Manager"
+event_database_name: madsci_events
+event_mongo_db_url: mongodb://localhost:27017/
+
+# Experiment Manager
+experiment_server_url: http://localhost:8002/
+experiment_manager_name: "Auto Calibration Experiment Manager"
+experiment_database_name: madsci_experiments
+experiment_mongo_db_url: mongodb://localhost:27017/
+
+# Resource Manager
+resource_server_url: http://localhost:8003/
+resource_manager_name: "Auto Calibration Resource Manager"
+resource_database_name: madsci_resources
+# resource_db_url: postgresql://... (put in .env)
+
+# Data Manager
+data_server_url: http://localhost:8004/
+data_manager_name: "Auto Calibration Data Manager"
+data_database_name: madsci_data
+data_mongo_db_url: mongodb://localhost:27017/
+
+# Workcell Manager
+workcell_server_url: http://localhost:8005/
+workcell_manager_name: "Auto Calibration Workcell"
+workcell_database_name: madsci_workcells
+workcell_mongo_db_url: mongodb://localhost:27017/
+# Nodes in this workcell (add entries as new nodes are added)
+workcell_nodes:
+  high_viscosity_liquid_weighing_1: http://localhost:2000/
+
+# Location Manager
+location_server_url: http://localhost:8006/
+location_manager_name: "Auto Calibration Location Manager"
+

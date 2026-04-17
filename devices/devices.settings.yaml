@@ -1,0 +1,27 @@
+# Device configurations for auto_calibration_lab
+#
+# This file is shared across all nodes in this lab.
+# Each section defines one device. To add a device, add a new section below.
+#
+# _class: the class name as registered in devices/__init__.py DEVICE_REGISTRY.
+#         Available classes: BalanceInterface, BalanceFakeInterface, HighViscosityDispenserInterface, HighViscosityDispenserFakeInterface
+# _interface_type: (optional) per-device override for the node-level interface_type setting.
+#         Set to "real" or "fake" to override. Remove or leave commented to follow node-level default.
+#         Note: mixing "real" and "fake" devices in a closed-loop action (e.g. dispense-by-weight)
+#         will cause incorrect behaviour. Use with care.
+# All other fields are passed directly to the class __init__ as keyword arguments.
+
+balance:
+  _class: BalanceInterface
+  # _interface_type:   # Uncomment and set to "real" or "fake" to override node-level interface_type
+  port: null          # TODO: e.g. COM3
+  baud_rate: 9600
+
+high_viscosity_dispenser:
+  _class: HighViscosityDispenserInterface
+  # _interface_type:   # Uncomment and set to "real" or "fake" to override node-level interface_type
+  port: null          # TODO: e.g. COM4
+  baud_rate: 9600
+  full_steps_per_rev: null   # TODO: depends on motor spec (e.g. 200)
+  microstep_multiplier: null # TODO: Tic T500 setting (1/2/4/8/32)
+  purge_speed_rps: null      # TODO: set purge speed [rev/s], max 2.0
