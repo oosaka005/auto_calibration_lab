@@ -23,3 +23,8 @@
 - `HighViscosityDispenser`: Added public methods `dispense(rotations, speed_rps)`, `suck_back(rotations, speed_rps)`, `purge(rotations)`
 - `HighViscosityDispenser`: Added private helpers `_set_max_speed`, `_rotations_to_microsteps`
 - `HighViscosityDispenser`: `close()` now calls `_halt_and_hold()` before deenergizing
+
+test test
+
+very test test
+
