@@ -149,12 +149,13 @@ class HighViscosityLiquidWeighingNode(RestNode):
           - paused : stops before the next device command (requires _checkpoint in actions)
           - errored: set automatically when an unhandled error occurs
         """
-        # Example of how to build node_state:
-        # state: dict[str, Any] = {}
-        # state["motor_position_steps"] = self.tic.get_current_position()
-        # state["current_weight_g"] = self.balance.read_weight()
-        # self.node_state = state
-        self.node_state = {}
+        if self.balance is not None and self.dispenser is not None:
+            self.node_state = {
+                "balance_status": self.balance.status,
+                "balance_last_weight_g": self.balance.current_mass_g,
+                "dispenser_status": self.dispenser.status,
+                "dispenser_motion_status": self.dispenser.motion_status,
+            }
 
     # -----------------------------------------------------------------------
     # Actions
@@ -170,102 +171,6 @@ class HighViscosityLiquidWeighingNode(RestNode):
     def tare(self) -> None:
         """Tare the balance."""
         self.balance.tare()
-
-    @action
-    def calibrate_density(
-        self,
-        rotations_per_increment: Annotated[float, "Motor rotations dispensed per increment"],
-        num_increments: Annotated[int, "Number of increments to dispense"] = 5,
-        speed_rps: Annotated[float, "Motor speed during calibration [rev/s]"] = 1.0,
-    ) -> ActionSucceeded:
-        """Estimate density [g/mL] by dispensing fixed rotation increments and measuring weight.
-
-        Tares the balance, then dispenses rotations_per_increment num_increments times
-        at speed_rps, recording cumulative weight after each increment.
-        Fits density via least squares using the fixed displacement of 0.05 mL/rev.
-        Returns density [g/mL], cumulative weights, and total volume dispensed.
-        """
-        if speed_rps > self.high_viscosity_dispenser.MAX_SPEED_RPS:
-            return ActionFailed(
-                errors=[Error(message=f"speed_rps {speed_rps} exceeds MAX_SPEED_RPS {self.high_viscosity_dispenser.MAX_SPEED_RPS}")]
-            )
-
-        self.balance.tare()
-        cumulative_weights: list[float] = []
-
-        for _ in range(num_increments):
-            self.high_viscosity_dispenser.dispense(rotations_per_increment, speed_rps)
-            weight = self.balance.read_weight()
-            cumulative_weights.append(weight)
-
-        total_rotations = rotations_per_increment * num_increments
-        total_volume_mL = total_rotations * self.high_viscosity_dispenser._ML_PER_REV
-        density = self._calc_density(cumulative_weights, rotations_per_increment)
-
-        return ActionSucceeded(
-            json_result={
-                "density_g_per_mL": density,
-                "total_rotations": total_rotations,
-                "total_volume_mL": total_volume_mL,
-                "cumulative_weights_g": cumulative_weights,
-            }
-        )
-
-    @action
-    def calibrate_speed(
-        self,
-        min_speed_rps: Annotated[float, "Minimum motor speed [rev/s]"],
-        max_speed_rps: Annotated[float, "Maximum motor speed [rev/s]"],
-        duration_s: Annotated[float, "Duration to run motor at each speed [s]"] = 10.0,
-    ) -> ActionSucceeded:
-        """Measure dispensing rate [g/min] at minimum and maximum motor speeds.
-
-        Tares the balance, runs motor at min_speed_rps for duration_s seconds,
-        reads weight to compute rate. Repeats at max_speed_rps.
-        Returns dispensing rate [g/min] at each speed.
-        """
-        if max_speed_rps > self.high_viscosity_dispenser.MAX_SPEED_RPS:
-            return ActionFailed(
-                errors=[Error(message=f"max_speed_rps {max_speed_rps} exceeds MAX_SPEED_RPS {self.high_viscosity_dispenser.MAX_SPEED_RPS}")]
-            )
-
-        self.balance.tare()
-        self.high_viscosity_dispenser.dispense(min_speed_rps * duration_s, min_speed_rps)
-        weight_at_min = self.balance.read_weight()
-        rate_min_g_per_min = weight_at_min / duration_s * 60.0
-
-        self.balance.tare()
-        self.high_viscosity_dispenser.dispense(max_speed_rps * duration_s, max_speed_rps)
-        weight_at_max = self.balance.read_weight()
-        rate_max_g_per_min = weight_at_max / duration_s * 60.0
-
-        return ActionSucceeded(
-            json_result={
-                "min_speed_rps": min_speed_rps,
-                "rate_at_min_speed_g_per_min": rate_min_g_per_min,
-                "max_speed_rps": max_speed_rps,
-                "rate_at_max_speed_g_per_min": rate_max_g_per_min,
-                "duration_s": duration_s,
-            }
-        )
-
-    def _calc_density(
-        self,
-        cumulative_weights: list[float],
-        rotations_per_increment: float,
-    ) -> float:
-        """Estimate density [g/mL] from cumulative weight measurements via least squares.
-
-        Fits weight_i = density × volume_i where volume_i = (i+1) * rotations_per_increment * ML_PER_REV.
-        """
-        ml_per_rev = self.high_viscosity_dispenser._ML_PER_REV
-        volumes = [
-            (i + 1) * rotations_per_increment * ml_per_rev
-            for i in range(len(cumulative_weights))
-        ]
-        numerator = sum(v * w for v, w in zip(volumes, cumulative_weights))
-        denominator = sum(v ** 2 for v in volumes)
-        return numerator / denominator
 
 
 if __name__ == "__main__":

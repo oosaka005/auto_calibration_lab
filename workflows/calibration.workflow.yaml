@@ -1,0 +1,54 @@
+name: dispenser_calibration
+
+metadata:
+  description: >
+    Calibrates the dispenser by estimating density [g/rot] and dispensing flow
+    rates [g/s] at minimum and maximum motor speeds.
+  version: 0.1.0
+
+parameters:
+  json_inputs:
+    - key: rotations_per_increment
+      description: Motor rotations dispensed per increment for density calibration
+      default: 2.0
+    - key: num_increments
+      description: Number of increments for density calibration
+      default: 5
+    - key: density_speed_rps
+      description: Motor speed during density calibration [rev/s]
+      default: 1.0
+    - key: min_speed_rps
+      description: Minimum motor speed for speed calibration [rev/s]
+      default: 0.5
+    - key: max_speed_rps
+      description: Maximum motor speed for speed calibration [rev/s]
+      default: 2.0
+    - key: speed_duration_s
+      description: Duration to run motor at each speed [s]
+      default: 10.0
+
+steps:
+  - key: tare_for_density
+    name: Tare balance before density calibration
+    node: high_viscosity_liquid_weighing
+    action: tare
+
+  - key: calibrate_density
+    name: Calibrate density [g/rot]
+    node: high_viscosity_liquid_weighing
+    action: calibrate_density
+    use_parameters:
+      args:
+        rotations_per_increment: rotations_per_increment
+        num_increments: num_increments
+        speed_rps: density_speed_rps
+
+  - key: calibrate_speed
+    name: Calibrate dispensing flow rate [g/s] at min/max speeds
+    node: high_viscosity_liquid_weighing
+    action: calibrate_speed
+    use_parameters:
+      args:
+        min_speed_rps: min_speed_rps
+        max_speed_rps: max_speed_rps
+        duration_s: speed_duration_s
