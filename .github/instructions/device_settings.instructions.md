@@ -76,7 +76,7 @@ high_viscosity_dispenser:
 ```
 
 - Per-device `_interface_type` takes precedence over the node-level `interface_type`.
-- `_class` always refers to the **real** interface class. The fake class is resolved automatically by replacing `Interface` with `FakeInterface` in the class name.
+- `_class` always refers to the **real** interface class. The fake class is resolved automatically by appending `Fake` to the class name (e.g. `BalanceProprietary` → `BalanceProprietaryFake`).
 - Warning: mixing `"real"` and `"fake"` in a closed-loop action (e.g. dispense-by-weight) will cause incorrect behaviour. Use with care.
 
 ### How the class is resolved (in `_build_device_classes`)
@@ -85,7 +85,7 @@ high_viscosity_dispenser:
 effective_type = _interface_type (device) if set, else interface_type (node)
 
 if effective_type == "fake":
-    class = DEVICE_REGISTRY["{ClassName}".replace("Interface", "FakeInterface")]
+    class = DEVICE_REGISTRY["{ClassName}" + "Fake"]
 else:
     class = DEVICE_REGISTRY["{ClassName}"]
 ```

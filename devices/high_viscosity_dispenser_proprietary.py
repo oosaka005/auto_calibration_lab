@@ -11,7 +11,7 @@ from typing import Optional
 import serial
 
 
-class HighViscosityDispenserInterface:
+class HighViscosityDispenserProprietary:
     """Serial interface for the Pololu Tic T500 stepper motor controller."""
 
     MAX_SPEED_RPS: float = 2.0   # eco-PEN450 hardware limit: 120 RPM

@@ -7,7 +7,7 @@ from typing import Optional
 import serial
 
 
-class BalanceInterface:
+class BalanceProprietary:
     """Serial interface for an analytical balance."""
 
     def __init__(

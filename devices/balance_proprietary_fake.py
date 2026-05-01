@@ -6,10 +6,10 @@ import time
 from typing import Optional
 
 
-class BalanceFakeInterface:
+class BalanceProprietaryFake:
     """Simulated interface for an analytical balance.
 
-    Provides the same API as BalanceInterface but generates fake data
+    Provides the same API as BalanceProprietary but generates fake data
     instead of communicating with hardware.
     """
 
@@ -31,7 +31,7 @@ class BalanceFakeInterface:
         self._failure_rate = failure_rate
         self.status = "connected"
         self.current_mass_g: float = base_mass_g
-        self._logger.info(f"BalanceFakeInterface: connected (fake, port={port})")
+        self._logger.info(f"BalanceProprietaryFake: connected (fake, port={port})")
 
     def _maybe_fail(self) -> None:
         """Randomly raise an exception based on failure_rate."""
@@ -64,4 +64,4 @@ class BalanceFakeInterface:
     def close(self) -> None:
         """Simulate disconnection."""
         self.status = "disconnected"
-        self._logger.info("BalanceFakeInterface: disconnected")
+        self._logger.info("BalanceProprietaryFake: disconnected")

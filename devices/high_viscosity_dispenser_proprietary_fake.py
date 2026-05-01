@@ -6,10 +6,10 @@ import time
 from typing import Optional
 
 
-class HighViscosityDispenserFakeInterface:
+class HighViscosityDispenserProprietaryFake:
     """Simulated interface for the Pololu Tic T500 stepper motor controller.
 
-    Provides the same API as HighViscosityDispenserInterface but simulates
+    Provides the same API as HighViscosityDispenserProprietary but simulates
     motor motion instead of communicating with hardware.
     """
 
@@ -37,7 +37,7 @@ class HighViscosityDispenserFakeInterface:
         self._failure_rate = failure_rate
         self.status = "connected"
         self.motion_status = "idle"
-        self._logger.info(f"HighViscosityDispenserFakeInterface: connected (fake, port={port})")
+        self._logger.info(f"HighViscosityDispenserProprietaryFake: connected (fake, port={port})")
 
     def _maybe_fail(self) -> None:
         """Randomly raise an exception based on failure_rate."""
@@ -71,4 +71,4 @@ class HighViscosityDispenserFakeInterface:
         """Simulate disconnection."""
         self.status = "disconnected"
         self.motion_status = "idle"
-        self._logger.info("HighViscosityDispenserFakeInterface: disconnected")
+        self._logger.info("HighViscosityDispenserProprietaryFake: disconnected")

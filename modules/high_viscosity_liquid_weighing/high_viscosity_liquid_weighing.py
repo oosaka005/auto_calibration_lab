@@ -55,7 +55,7 @@ class HighViscosityLiquidWeighingConfig(
             cls_name = cfg["_class"]
             effective_type = cfg.get("_interface_type") or global_type
             if effective_type == "fake":
-                fake_cls_name = cls_name.replace("Interface", "FakeInterface")
+                fake_cls_name = cls_name + "Fake"
                 if fake_cls_name not in DEVICE_REGISTRY:
                     raise ValueError(f"{fake_cls_name!r} is not registered in devices.DEVICE_REGISTRY")
                 result[name] = DEVICE_REGISTRY[fake_cls_name]

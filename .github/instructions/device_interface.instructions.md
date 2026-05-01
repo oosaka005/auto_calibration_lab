@@ -54,13 +54,15 @@ applyTo: "modules/devices/**"
 ## Naming Conventions
 
 ### Real interface files
-- File name: `{device_name}_interface.py` (e.g. `balance_interface.py`)
-- Class name: `{DeviceName}Interface` (e.g. `BalanceInterface`)
+- File name: `{device_name}_{protocol}.py` (e.g. `balance_proprietary.py`, `balance_sila.py`)
+- Class name: `{DeviceName}{Protocol}` (e.g. `BalanceProprietary`, `BalanceSila`)
+- `{protocol}` reflects the connection method (e.g. `proprietary` for direct serial, `sila` for SiLA2)
 
 ### Fake interface files
-- File name: `{device_name}_fake_interface.py` (e.g. `balance_fake_interface.py`)
-- Class name: `{DeviceName}FakeInterface` (e.g. `BalanceFakeInterface`)
-- Register in `DEVICE_REGISTRY` with the class name as key (e.g. `"BalanceFakeInterface": BalanceFakeInterface`)
+- File name: `{device_name}_{protocol}_fake.py` (e.g. `balance_proprietary_fake.py`)
+- Class name: `{DeviceName}{Protocol}Fake` (e.g. `BalanceProprietaryFake`)
+- The fake class name is derived by appending `Fake` to the real class name (e.g. `BalanceProprietary` → `BalanceProprietaryFake`)
+- Register in `DEVICE_REGISTRY` with the class name as key (e.g. `"BalanceProprietaryFake": BalanceProprietaryFake`)
 - Switch between real and fake via `_class:` in `devices.settings.yaml`
 
 ## Fake Interface Rules
