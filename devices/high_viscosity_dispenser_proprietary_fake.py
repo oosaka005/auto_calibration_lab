@@ -72,3 +72,6 @@ class HighViscosityDispenserProprietaryFake:
         self.status = "disconnected"
         self.motion_status = "idle"
         self._logger.info("HighViscosityDispenserProprietaryFake: disconnected")
+
+    def check_status(self) -> None:
+        """No-op for fake interface; status is always connected."""

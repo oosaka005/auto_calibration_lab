@@ -14,8 +14,13 @@
 balance:
   _class: BalanceProprietary
   # _interface_type:   # Uncomment and set to "real" or "fake" to override node-level interface_type
-  port: null          # TODO: e.g. COM3
+  # --- BalanceProprietary (serial) ---
+  port: null            # TODO: e.g. COM3 (used by BalanceProprietary)
   baud_rate: 9600
+  # --- BalanceSila (SiLA2 over network) ---
+  host: null            # TODO: e.g. 100.x.x.x (TailScale IP, used by BalanceSila)
+  sila_port: 50052
+  insecure: true
 
 high_viscosity_dispenser:
   _class: HighViscosityDispenserProprietary

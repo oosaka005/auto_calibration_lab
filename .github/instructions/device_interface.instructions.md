@@ -30,6 +30,48 @@ applyTo: "modules/devices/**"
 - Set `status = "connected"` at the end of `__init__`; set `status = "disconnected"` in `close()`.
 - Any value intended for dashboard display should be stored as an instance attribute and updated whenever the relevant command is called.
 
+## Connection Check (`check_status`)
+
+Every device class must implement a `check_status(self) -> None` method. It is called by `state_handler` every ~2 seconds.
+
+- **Purpose**: verify the physical connection and update `self.status` in real time without waiting for a command to fail.
+- **On success**: optionally update cached values (e.g. `current_mass_g`). Do not change `status`.
+- **On failure**: set `self.status = "disconnected"`. Do not raise — swallow the exception.
+- **Busy guard (serial/hardware devices)**: use `threading.Lock` to prevent concurrent access.
+  - Acquire the lock non-blocking (`self._lock.acquire(blocking=False)`).
+  - If the device is busy, return immediately without changing `status`.
+  - All public commands that communicate with hardware must also use `with self._lock:`.
+- **SiLA devices**: call a lightweight Property (e.g. `Status`) instead. No lock needed.
+- **Fake interfaces**: implement as a no-op (`pass`). Do not simulate failures here.
+
+```python
+# Serial example
+def check_status(self) -> None:
+    """Try a lightweight read to verify connection. Skipped if busy."""
+    if not self._lock.acquire(blocking=False):
+        return
+    try:
+        self._serial.write(b"R")
+        raw = self._read_response()
+        self.current_mass_g = float(raw.strip())
+    except Exception:
+        self.status = "disconnected"
+    finally:
+        self._lock.release()
+
+# SiLA example
+def check_status(self) -> None:
+    """Read Status property from SiLA server to verify connection."""
+    try:
+        self.status = self._client.Balance.Status.get()
+    except Exception:
+        self.status = "disconnected"
+
+# Fake example
+def check_status(self) -> None:
+    """No-op for fake interface; status is always connected."""
+```
+
 ## Logger
 
 - Accept an optional `logger` argument in `__init__`. Fall back to `logging.getLogger(__name__)` when omitted.

@@ -150,6 +150,10 @@ class HighViscosityLiquidWeighingNode(RestNode):
           - errored: set automatically when an unhandled error occurs
         """
         if self.balance is not None and self.dispenser is not None:
+            for name in self.config.DEVICE_CLASSES:
+                device = getattr(self, name)
+                if device is not None:
+                    device.check_status()
             self.node_state = {
                 "balance_status": self.balance.status,
                 "balance_last_weight_g": self.balance.current_mass_g,

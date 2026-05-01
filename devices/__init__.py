@@ -1,5 +1,7 @@
 from .balance_proprietary import BalanceProprietary
 from .balance_proprietary_fake import BalanceProprietaryFake
+from .balance_sila import BalanceSila
+from .balance_sila_fake import BalanceSilaFake
 from .high_viscosity_dispenser_proprietary import HighViscosityDispenserProprietary
 from .high_viscosity_dispenser_proprietary_fake import HighViscosityDispenserProprietaryFake
 
@@ -13,6 +15,8 @@ from .high_viscosity_dispenser_proprietary_fake import HighViscosityDispenserPro
 DEVICE_REGISTRY: dict[str, type] = {
     "BalanceProprietary": BalanceProprietary,
     "BalanceProprietaryFake": BalanceProprietaryFake,
+    "BalanceSila": BalanceSila,
+    "BalanceSilaFake": BalanceSilaFake,
     "HighViscosityDispenserProprietary": HighViscosityDispenserProprietary,
     "HighViscosityDispenserProprietaryFake": HighViscosityDispenserProprietaryFake,
 }
@@ -20,6 +24,8 @@ DEVICE_REGISTRY: dict[str, type] = {
 __all__ = [
     "BalanceProprietary",
     "BalanceProprietaryFake",
+    "BalanceSila",
+    "BalanceSilaFake",
     "HighViscosityDispenserProprietary",
     "HighViscosityDispenserProprietaryFake",
     "DEVICE_REGISTRY",

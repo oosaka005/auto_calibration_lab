@@ -1,4 +1,4 @@
-"""Fake interface for an analytical balance (testing without hardware)."""
+"""Fake SiLA2 interface for an analytical balance (testing without hardware)."""
 
 import logging
 import random
@@ -6,18 +6,18 @@ import time
 from typing import Optional
 
 
-class BalanceProprietaryFake:
-    """Simulated interface for an analytical balance.
+class BalanceSilaFake:
+    """Simulated SiLA2 interface for an analytical balance.
 
-    Provides the same API as BalanceProprietary but generates fake data
-    instead of communicating with hardware.
+    Provides the same API as BalanceSila but generates fake data
+    instead of connecting to a SiLA server.
     """
 
     def __init__(
         self,
-        port: str = "FAKE",
-        baud_rate: int = 9600,
-        timeout: float = 1.0,
+        host: str = "127.0.0.1",
+        sila_port: int = 50052,
+        insecure: bool = True,
         latency: float = 0.1,
         base_mass_g: float = 0.0,
         noise_std: float = 0.01,
@@ -31,7 +31,7 @@ class BalanceProprietaryFake:
         self._failure_rate = failure_rate
         self.status = "connected"
         self.current_mass_g: float = base_mass_g
-        self._logger.info(f"BalanceProprietaryFake: connected (fake, port={port})")
+        self._logger.info(f"BalanceSilaFake: connected (fake, host={host}:{sila_port})")
 
     def _maybe_fail(self) -> None:
         """Randomly raise an exception based on failure_rate."""
@@ -64,7 +64,7 @@ class BalanceProprietaryFake:
     def close(self) -> None:
         """Simulate disconnection."""
         self.status = "disconnected"
-        self._logger.info("BalanceProprietaryFake: disconnected")
+        self._logger.info("BalanceSilaFake: disconnected")
 
     def check_status(self) -> None:
         """No-op for fake interface; status is always connected."""

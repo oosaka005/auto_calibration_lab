@@ -5,6 +5,7 @@ Serial command protocol is used (not native USB).
 """
 
 import logging
+import threading
 import time
 from typing import Optional
 
@@ -29,6 +30,7 @@ class HighViscosityDispenserProprietary:
         self._logger = logger or logging.getLogger(__name__)
         if purge_speed_rps > self.MAX_SPEED_RPS:
             raise ValueError(f"purge_speed_rps {purge_speed_rps} exceeds MAX_SPEED_RPS {self.MAX_SPEED_RPS}")
+        self._lock = threading.Lock()
         self._full_steps_per_rev = full_steps_per_rev
         self._microstep_multiplier = microstep_multiplier
         self._purge_speed_rps = purge_speed_rps
@@ -74,30 +76,36 @@ class HighViscosityDispenserProprietary:
         """Rotate forward by `rotations` rev at `speed_rps` rev/s to dispense material."""
         if speed_rps > self.MAX_SPEED_RPS:
             raise ValueError(f"speed_rps {speed_rps} exceeds MAX_SPEED_RPS {self.MAX_SPEED_RPS}")
-        self.motion_status = "dispensing"
-        self._exit_safe_start()
-        self._set_target_velocity(self._rps_to_tic_velocity(speed_rps))
-        time.sleep(rotations / speed_rps)
-        self._halt_and_hold()
-        self.motion_status = "idle"
+        with self._lock:
+            self.motion_status = "dispensing"
+            self._exit_safe_start()
+            self._set_target_velocity(self._rps_to_tic_velocity(speed_rps))
+            time.sleep(rotations / speed_rps)
+            self._halt_and_hold()
+            self.motion_status = "idle"
 
     def suck_back(self, rotations: float, speed_rps: float) -> None:
         """Rotate backward by `rotations` rev at `speed_rps` rev/s to prevent dripping."""
-        self.motion_status = "purging"
-        self._exit_safe_start()
-        self._set_target_velocity(-self._rps_to_tic_velocity(speed_rps))
-        time.sleep(rotations / speed_rps)
-        self._halt_and_hold()
-        self.motion_status = "idle"
+        with self._lock:
+            self.motion_status = "purging"
+            self._exit_safe_start()
+            self._set_target_velocity(-self._rps_to_tic_velocity(speed_rps))
+            time.sleep(rotations / speed_rps)
+            self._halt_and_hold()
+            self.motion_status = "idle"
 
     def purge(self, rotations: float) -> None:
         """Rotate forward by `rotations` rev at the fixed purge speed to prime or clear the nozzle."""
-        self.motion_status = "purging"
-        self._exit_safe_start()
-        self._set_target_velocity(self._rps_to_tic_velocity(self._purge_speed_rps))
-        time.sleep(rotations / self._purge_speed_rps)
-        self._halt_and_hold()
-        self.motion_status = "idle"
+        with self._lock:
+            self.motion_status = "purging"
+            self._exit_safe_start()
+            self._set_target_velocity(self._rps_to_tic_velocity(self._purge_speed_rps))
+            time.sleep(rotations / self._purge_speed_rps)
+            self._halt_and_hold()
+            self.motion_status = "idle"
+
+    def check_status(self) -> None:
+        """No-op placeholder; serial stepper has no lightweight status query. Skipped if busy."""
 
     def close(self) -> None:
         """Stop the motor gracefully and close the serial connection."""
