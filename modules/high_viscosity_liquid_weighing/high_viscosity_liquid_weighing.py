@@ -158,7 +158,6 @@ class HighViscosityLiquidWeighingNode(RestNode):
                 "balance_status": self.balance.status,
                 "balance_last_weight_g": self.balance.current_mass_g,
                 "dispenser_status": self.dispenser.status,
-                "dispenser_motion_status": self.dispenser.motion_status,
             }
 
     # -----------------------------------------------------------------------

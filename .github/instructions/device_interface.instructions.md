@@ -28,7 +28,7 @@ applyTo: "modules/devices/**"
 
 - Every device class must have a `status: str` attribute with value `"connected"` or `"disconnected"`.
 - Set `status = "connected"` at the end of `__init__`; set `status = "disconnected"` in `close()`.
-- Any value intended for dashboard display should be stored as an instance attribute and updated whenever the relevant command is called.
+- For any device-specific value to display on the dashboard, define a dedicated attribute (e.g. `current_mass_g: float`) and update it inside the relevant command. Reference it explicitly in `state_handler` in the Node module.
 
 ## Connection Check (`check_status`)
 
@@ -114,7 +114,7 @@ Follow the MADSci fake interface conventions (`docs/guides/integrator/04-fake-in
 - **Same API**: Method signatures (arguments and return types) must be identical to the real interface.
 - **No hardware dependencies**: Do not import or instantiate `serial.Serial` or any hardware library. Set `status = "connected"` immediately in `__init__`.
 - **Same argument validation**: Preserve all `ValueError`/`Exception` checks from the real interface (e.g. speed limits).
-- **Same instance attributes**: Declare and update the same instance attributes as the real interface (e.g. `current_mass_g`, `motion_status`).
+- **Same instance attributes**: Declare and update the same instance attributes as the real interface (e.g. `current_mass_g`).
 - **Realistic timing**: Accept a `latency: float = 0.1` parameter in `__init__` and scale `time.sleep()` calls by it (e.g. `time.sleep(settle_time * self.latency)`).
 - **Realistic data**: Return plausible values using `random.gauss()` or `random.uniform()` with a configurable base value and noise.
 - **Failure simulation**: Accept a `failure_rate: float = 0.0` parameter and raise an `Exception` randomly at that probability at the start of each public method.

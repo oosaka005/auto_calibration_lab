@@ -25,8 +25,8 @@ balance:
 high_viscosity_dispenser:
   _class: HighViscosityDispenserProprietary
   # _interface_type:   # Uncomment and set to "real" or "fake" to override node-level interface_type
-  port: null          # TODO: e.g. COM4
+  port: /dev/serial0  # RPi5: GPIO14(TX)/GPIO15(RX). Windows: e.g. COM4
   baud_rate: 9600
-  full_steps_per_rev: null   # TODO: depends on motor spec (e.g. 200)
-  microstep_multiplier: null # TODO: Tic T500 setting (1/2/4/8/32)
-  purge_speed_rps: null      # TODO: set purge speed [rev/s], max 2.0
+  full_steps_per_rev: 1036   # 17HS19-1684S-PG5: 200 steps/rev × 5.18 gear ratio
+  microstep_multiplier: 1    # Full step (must match Tic T500 Step mode setting)
+  purge_speed_rps: null      # TODO: set after hardware test [rev/s], max 2.0

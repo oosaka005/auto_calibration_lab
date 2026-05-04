@@ -226,7 +226,7 @@ Admin commands are sent via `POST /admin/{command}`. Some are implemented by the
 
 ### Pause support
 
-**Design principle:** Device commands in this project are synchronous and blocking (`device_interface.instructions.md`). 
+**Design principle:** Most device commands in this project are synchronous and block until the operation completes. Some commands (e.g. `start_rotation`) return immediately and rely on a paired command (e.g. `stop_rotation`) to terminate the operation. In both cases, the Action wrapping the command completes normally and returns `ActionSucceeded`.
 
 ```python
 # Node class — implement these methods

@@ -36,7 +36,6 @@ class HighViscosityDispenserProprietaryFake:
         self._latency = latency
         self._failure_rate = failure_rate
         self.status = "connected"
-        self.motion_status = "idle"
         self._logger.info(f"HighViscosityDispenserProprietaryFake: connected (fake, port={port})")
 
     def _maybe_fail(self) -> None:
@@ -49,28 +48,21 @@ class HighViscosityDispenserProprietaryFake:
         if speed_rps > self.MAX_SPEED_RPS:
             raise ValueError(f"speed_rps {speed_rps} exceeds MAX_SPEED_RPS {self.MAX_SPEED_RPS}")
         self._maybe_fail()
-        self.motion_status = "dispensing"
         time.sleep((rotations / speed_rps) * self._latency)
-        self.motion_status = "idle"
 
     def suck_back(self, rotations: float, speed_rps: float) -> None:
         """Simulate backward rotation by `rotations` rev at `speed_rps` rev/s."""
         self._maybe_fail()
-        self.motion_status = "purging"
         time.sleep((rotations / speed_rps) * self._latency)
-        self.motion_status = "idle"
 
     def purge(self, rotations: float) -> None:
         """Simulate purge rotation by `rotations` rev at the fixed purge speed."""
         self._maybe_fail()
-        self.motion_status = "purging"
         time.sleep((rotations / self._purge_speed_rps) * self._latency)
-        self.motion_status = "idle"
 
     def close(self) -> None:
         """Simulate disconnection."""
         self.status = "disconnected"
-        self.motion_status = "idle"
         self._logger.info("HighViscosityDispenserProprietaryFake: disconnected")
 
     def check_status(self) -> None:

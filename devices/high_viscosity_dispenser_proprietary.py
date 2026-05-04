@@ -2,6 +2,22 @@
 
 Reference: https://www.pololu.com/docs/0J71
 Serial command protocol is used (not native USB).
+
+--- Wiring (Raspberry Pi 5) ---
+
+    GPIO14 (pin 8,  TX) --> Tic RX
+    GPIO15 (pin 10, RX) <-- Tic TX
+    GND    (pin 6)      --> Tic GND
+    port = "/dev/serial0"
+    Enable the serial port via raspi-config:
+        Interface Options -> Serial Port -> login shell: No, hardware enabled: Yes
+
+--- Tic Control Center (one-time USB setup) ---
+
+    - Control mode: Serial / I2C / USB
+    - Command timeout: disabled  (required for dispensing longer than 1 s)
+    - Baud rate: 9600            (must match baud_rate parameter)
+    - Step mode: match microstep_multiplier  (T500 supports full / 1/2 / 1/4 / 1/8)
 """
 
 import logging
@@ -41,7 +57,6 @@ class HighViscosityDispenserProprietary:
         self._energize()
         self._exit_safe_start()
         self.status = "connected"
-        self.motion_status = "idle"
         self._logger.info(f"HighViscosityDispenser: connected on {port}")
 
     def _energize(self) -> None:
@@ -61,8 +76,11 @@ class HighViscosityDispenserProprietary:
         self._serial.write(b"\x8f")
 
     def _set_target_velocity(self, velocity: int) -> None:
-        """Set target velocity in 0.0001 microsteps/s (command 0xE5, 32-bit LE signed)."""
-        self._serial.write(b"\xe5" + velocity.to_bytes(4, byteorder="little", signed=True))
+        """Set target velocity in 0.0001 microsteps/s (command 0xE3, Tic 32-bit serial encoding)."""
+        raw = velocity.to_bytes(4, byteorder="little", signed=True)
+        msbs = sum((1 << i) for i, byte in enumerate(raw) if byte & 0x80)
+        payload = bytes([msbs]) + bytes([byte & 0x7F for byte in raw])
+        self._serial.write(b"\xe3" + payload)
 
     def _rps_to_tic_velocity(self, speed_rps: float) -> int:
         """Convert rev/s to Tic T500 velocity units (0.0001 microsteps/s)."""
@@ -72,37 +90,60 @@ class HighViscosityDispenserProprietary:
         """Stop motion immediately and hold position (command 0x89)."""
         self._serial.write(b"\x89")
 
-    def dispense(self, rotations: float, speed_rps: float) -> None:
-        """Rotate forward by `rotations` rev at `speed_rps` rev/s to dispense material."""
+    def _rotate(self, rotations: float, speed_rps: float, direction: int) -> None:
+        """Rotate the screw by `rotations` rev at `speed_rps` rev/s in `direction` (+1 = forward, -1 = reverse)."""
+        if speed_rps > self.MAX_SPEED_RPS:
+            raise ValueError(f"speed_rps {speed_rps} exceeds MAX_SPEED_RPS {self.MAX_SPEED_RPS}")
+        self._exit_safe_start()
+        self._set_target_velocity(direction * self._rps_to_tic_velocity(speed_rps))
+        time.sleep(rotations / speed_rps)
+        self._halt_and_hold()
+
+    def _continuous_rotate_worker(self, speed_rps: float, direction: int) -> None:
+        """Worker thread: rotate continuously until _stop_event is set."""
+        self._exit_safe_start()
+        self._set_target_velocity(direction * self._rps_to_tic_velocity(speed_rps))
+        self._stop_event.wait()
+        self._halt_and_hold()
+
+    def start_rotation(self, speed_rps: float, direction: int) -> None:
+        """Start continuous rotation at `speed_rps` rev/s in `direction` (+1 = forward, -1 = reverse).
+
+        Returns immediately; call stop_rotation() to stop.
+        Raises RuntimeError if already rotating.
+        """
         if speed_rps > self.MAX_SPEED_RPS:
             raise ValueError(f"speed_rps {speed_rps} exceeds MAX_SPEED_RPS {self.MAX_SPEED_RPS}")
         with self._lock:
-            self.motion_status = "dispensing"
-            self._exit_safe_start()
-            self._set_target_velocity(self._rps_to_tic_velocity(speed_rps))
-            time.sleep(rotations / speed_rps)
-            self._halt_and_hold()
-            self.motion_status = "idle"
+            if hasattr(self, "_rotation_thread") and self._rotation_thread.is_alive():
+                raise RuntimeError("Already rotating. Call stop_rotation() first.")
+            self._stop_event = threading.Event()
+            self._rotation_thread = threading.Thread(
+                target=self._continuous_rotate_worker,
+                args=(speed_rps, direction),
+                daemon=True,
+            )
+            self._rotation_thread.start()
+
+    def stop_rotation(self) -> None:
+        """Stop continuous rotation started by start_rotation() and wait for the motor to halt."""
+        self._stop_event.set()
+        self._rotation_thread.join()
+
+    def dispense(self, rotations: float, speed_rps: float) -> None:
+        """Rotate forward by `rotations` rev at `speed_rps` rev/s to dispense material."""
+        with self._lock:
+            self._rotate(rotations, speed_rps, +1)
 
     def suck_back(self, rotations: float, speed_rps: float) -> None:
         """Rotate backward by `rotations` rev at `speed_rps` rev/s to prevent dripping."""
         with self._lock:
-            self.motion_status = "purging"
-            self._exit_safe_start()
-            self._set_target_velocity(-self._rps_to_tic_velocity(speed_rps))
-            time.sleep(rotations / speed_rps)
-            self._halt_and_hold()
-            self.motion_status = "idle"
+            self._rotate(rotations, speed_rps, -1)
 
     def purge(self, rotations: float) -> None:
         """Rotate forward by `rotations` rev at the fixed purge speed to prime or clear the nozzle."""
         with self._lock:
-            self.motion_status = "purging"
-            self._exit_safe_start()
-            self._set_target_velocity(self._rps_to_tic_velocity(self._purge_speed_rps))
-            time.sleep(rotations / self._purge_speed_rps)
-            self._halt_and_hold()
-            self.motion_status = "idle"
+            self._rotate(rotations, self._purge_speed_rps, +1)
 
     def check_status(self) -> None:
         """No-op placeholder; serial stepper has no lightweight status query. Skipped if busy."""
@@ -115,5 +156,4 @@ class HighViscosityDispenserProprietary:
             self._deenergize()
             self._serial.close()
             self.status = "disconnected"
-            self.motion_status = "idle"
             self._logger.info("HighViscosityDispenser: disconnected")
