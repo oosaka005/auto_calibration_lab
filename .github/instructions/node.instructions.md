@@ -175,6 +175,8 @@ def state_handler(self) -> None:
 - `blocking=True` is the default — only one blocking action can run at a time per Node
 - Use `@action(blocking=False)` for actions that can run concurrently with other actions
 
+Device field names in the Node (e.g. `self.balance`, `self.high_viscosity_dispenser`) come directly from the **section names in `devices/devices.settings.yaml`**. The section name = the field name. This is also the name listed under `devices:` in `node.settings.yaml`.
+
 ```python
 @action
 def dispense_target_mass(self, target_g: float, speed_rps: float) -> ActionSucceeded:
@@ -334,7 +336,9 @@ def calibrate_density(self, ...) -> ActionSucceeded:
 Specify only `label` and `value` (or `path`). The following are attached automatically:
 - `datapoint_id` — ULID, auto-generated
 - `data_timestamp` — time of saving
-- `ownership_info` — `workflow_id`, `step_id`, `experiment_id`, etc., inherited from execution context
+- `ownership_info` — `experiment_id`, `campaign_id`, `workflow_id`, `step_id`, `node_id`, `workcell_id`, `user_id`, `manager_id`, `project_id`, `lab_id` — populated automatically from Workflow execution context; all `null` when called directly (e.g. from Swagger UI)
+
+Fields that the system cannot know must be stored manually inside `value` (e.g. `material_name`, `pressure_mpa`).
 
 The Data Manager selects the storage backend automatically:
 - `ValueDataPoint` → MongoDB

@@ -9,7 +9,6 @@ applyTo: "compose.yaml"
 
 The following are fixed by the MADSci framework. Changing them will break the system:
 
-- `network_mode: host` — required so all services can reach each other via `localhost`
 - `restart: unless-stopped` — required on all services for 24/7 lab automation
 - `command:` for managers — fixed entry points defined by MADSci (see Manager Commands below)
 - `depends_on:` structure — defines startup order required by MADSci
@@ -34,21 +33,27 @@ New nodes can be added under `# ---- Nodes ----`. The format is fixed:
 <node_service_name>:
   <<: *madsci-service
   container_name: <node_service_name>
-  environment:
-    - NODE_NAME=<node_service_name>
-    - NODE_MODULE_NAME=<module_name>
-    - NODE_URL=http://localhost:<port>
   command: python modules/<node_name>/<node_name>.py
   depends_on:
     - event_manager
+  ports:
+    - "<port>:<port>"
+  environment:
+    - NODE_NAME=<node_service_name>
+    - NODE_MODULE_NAME=<module_name>
+    - NODE_URL=http://0.0.0.0:<port>/
+    - EVENT_SERVER_URL=http://event_manager:8001/
+    - RESOURCE_SERVER_URL=http://resource_manager:8003/
 ```
 
 Rules for node entries:
 - `NODE_NAME` must exactly match the key in `workcell_nodes` in `settings.yaml`
-- `NODE_URL` must exactly match the URL in `workcell_nodes` in `settings.yaml`
+- `NODE_URL` must use `0.0.0.0` (not `localhost`) so the node is reachable from outside the container
+- `workcell_nodes` in `settings.yaml` should use `http://localhost:<port>/` (Windows side)
 - Each node must use a unique port number
 - `command:` path must be relative to `working_dir` and point to the node's Python file
 - Always include `depends_on: - event_manager`
+- Always include `EVENT_SERVER_URL` and `RESOURCE_SERVER_URL` pointing to container names
 
 ## Service Structure
 
@@ -57,7 +62,6 @@ All MADSci services use a shared anchor for common configuration:
 ```yaml
 x-madsci-service: &madsci-service
   image: ghcr.io/ad-sdl/madsci:latest
-  network_mode: host
   env_file:
     - ./.env
   volumes:
@@ -65,9 +69,19 @@ x-madsci-service: &madsci-service
     - ./.madsci:/home/madsci/.madsci
   restart: unless-stopped
   working_dir: /home/madsci/<lab_name>
+  networks:
+    - madsci_net
 ```
 
 Each manager/node service uses `<<: *madsci-service` to inherit this configuration. `restart: unless-stopped` is inherited from this anchor — do NOT add it again individually to managers or nodes.
+
+A named bridge network must be declared at the end of the file:
+
+```yaml
+networks:
+  madsci_net:
+    driver: bridge
+```
 
 ## Required Infrastructure Services
 
@@ -112,6 +126,48 @@ Each MADSci service requires two volume mounts (inherited via `*madsci-service`)
 
 Infrastructure services only need one volume for their own data directory.
 
-## network_mode
+## Network Architecture (Bridge Network)
 
-Use `network_mode: host` for all MADSci services. This allows services to communicate via `localhost` without port mapping. Infrastructure services do not use `network_mode: host` and require explicit `ports:` entries instead.
+This project uses a **bridge network** (`madsci_net`) instead of `network_mode: host`.
+
+**Why:** `network_mode: host` is Linux-only and does not work on Docker Desktop for Windows.
+The bridge network approach works on both Linux and Windows.
+
+### Three rules that must be followed together:
+
+| Rule | Purpose |
+|------|---------|
+| `networks: - madsci_net` on every service | Enables container-to-container DNS resolution by container name |
+| `ports: - "<port>:<port>"` on every manager/node | Exposes the service to Windows `localhost` |
+| `{PREFIX}_SERVER_URL=http://0.0.0.0:<port>/` in `environment:` | Makes the server bind to all interfaces, not just `127.0.0.1` |
+
+### URL conventions
+
+| Context | URL format |
+|---------|------------|
+| Container → other container | `http://<container_name>:<port>/` (e.g. `http://event_manager:8001/`) |
+| Container's own bind address | `http://0.0.0.0:<port>/` |
+| Windows → container (notebooks, scripts) | `http://localhost:<port>/` |
+
+> **Note:** `settings.yaml` uses `http://localhost:<port>/` throughout (Windows-side URLs).
+> The `environment:` in `compose.yaml` overrides the bind address to `0.0.0.0` and
+> inter-container URLs to container names. This is why both files are needed.
+
+### Manager environment variables
+
+Each manager service must declare its own `SERVER_URL` and the URLs of services it connects to:
+
+| Manager | Required environment variables |
+|---------|--------------------------------|
+| `event_manager` | `EVENT_SERVER_URL=http://0.0.0.0:8001/`, `EVENT_MONGO_DB_URL=mongodb://madsci_mongodb:27017/` |
+| `resource_manager` | `RESOURCE_SERVER_URL=http://0.0.0.0:8003/`, `RESOURCE_DB_URL=postgresql://madsci:madsci@madsci_postgres:5432/madsci_resources`, `EVENT_SERVER_URL=http://event_manager:8001/` |
+| `data_manager` | `DATA_SERVER_URL=http://0.0.0.0:8004/`, `DATA_MONGO_DB_URL=mongodb://madsci_mongodb:27017/`, `EVENT_SERVER_URL=http://event_manager:8001/` |
+| `workcell_manager` | `WORKCELL_SERVER_URL=http://0.0.0.0:8005/`, `WORKCELL_MONGO_DB_URL=mongodb://madsci_mongodb:27017/`, `WORKCELL_REDIS_HOST=madsci_redis`, `EVENT_SERVER_URL=http://event_manager:8001/`, `RESOURCE_SERVER_URL=http://resource_manager:8003/`, `LOCATION_SERVER_URL=http://location_manager:8006/` |
+| `location_manager` | `LOCATION_SERVER_URL=http://0.0.0.0:8006/`, `LOCATION_REDIS_HOST=madsci_redis`, `EVENT_SERVER_URL=http://event_manager:8001/`, `RESOURCE_SERVER_URL=http://resource_manager:8003/` |
+
+> **Infrastructure services** (`madsci_mongodb`, `madsci_redis`, `madsci_postgres`) do not use
+> the `*madsci-service` anchor, but must still be added to `madsci_net` explicitly:
+> ```yaml
+> networks:
+>   - madsci_net
+> ```

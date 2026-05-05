@@ -3,16 +3,14 @@
 # Usage:
 #   docker compose up -d
 #
-# TODO: Before first use, update the following in .env:
-#   RESOURCE_DB_URL=postgresql://madsci:madsci@localhost:5432/madsci_resources
-#
 # Infrastructure (MongoDB, PostgreSQL) is included below.
 # Credentials are set to defaults (madsci/madsci) — change for production use.
 
 # * Common configuration for MADSci services
+# Note: network_mode: host is replaced with bridge networking + explicit ports
+# to ensure services are accessible from the Windows host on Docker Desktop.
 x-madsci-service: &madsci-service
   image: ghcr.io/ad-sdl/madsci:latest
-  network_mode: host
   env_file:
     - ./.env
   volumes:
@@ -20,6 +18,8 @@ x-madsci-service: &madsci-service
     - ./.madsci:/home/madsci/.madsci
   restart: unless-stopped
   working_dir: /home/madsci/auto_calibration_lab
+  networks:
+    - madsci_net
 
 services:
 
@@ -33,6 +33,8 @@ services:
       - ${MONGODB_PORT:-27017}:27017
     volumes:
       - ./.madsci/mongodb:/data/db
+    networks:
+      - madsci_net
 
   madsci_redis:
     container_name: madsci_redis
@@ -43,6 +45,8 @@ services:
     volumes:
       - ./.madsci/redis:/data
     command: redis-server --appendonly yes --save 900 1 --save 300 10 --save 60 10000
+    networks:
+      - madsci_net
 
   madsci_postgres:
     container_name: madsci_postgres
@@ -57,6 +61,8 @@ services:
       - ${POSTGRES_PORT:-5432}:5432
     volumes:
       - ./.madsci/postgresql/data:/var/lib/postgresql/data
+    networks:
+      - madsci_net
 
   # ---- MADSci Managers ----
 
@@ -64,7 +70,7 @@ services:
     <<: *madsci-service
     container_name: lab_manager
     image: ghcr.io/ad-sdl/madsci_dashboard:latest
-    command: python -m madsci.squid.lab_server
+    command: python -m madsci.squid.lab_server --server-url http://0.0.0.0:8000/
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health", "||", "exit", "1"]
       interval: 30s
@@ -73,6 +79,10 @@ services:
       start_period: 40s
     depends_on:
       - event_manager
+    ports:
+      - "8000:8000"
+    environment:
+      - EVENT_SERVER_URL=http://event_manager:8001/
 
   event_manager:
     <<: *madsci-service
@@ -80,14 +90,24 @@ services:
     command: python -m madsci.event_manager.event_server
     depends_on:
       - madsci_mongodb
+    ports:
+      - "8001:8001"
+    environment:
+      - EVENT_SERVER_URL=http://0.0.0.0:8001/
+      - EVENT_MONGO_DB_URL=mongodb://madsci_mongodb:27017/
 
   experiment_manager:
     <<: *madsci-service
     container_name: experiment_manager
-    command: python -m madsci.experiment_manager.experiment_server
+    command: python -m madsci.experiment_manager.experiment_server --server-url http://0.0.0.0:8002/
     depends_on:
       - madsci_mongodb
       - lab_manager
+    ports:
+      - "8002:8002"
+    environment:
+      - EXPERIMENT_MONGO_DB_URL=mongodb://madsci_mongodb:27017/
+      - EVENT_SERVER_URL=http://event_manager:8001/
 
   resource_manager:
     <<: *madsci-service
@@ -96,6 +116,12 @@ services:
     depends_on:
       - madsci_postgres
       - event_manager
+    ports:
+      - "8003:8003"
+    environment:
+      - RESOURCE_SERVER_URL=http://0.0.0.0:8003/
+      - RESOURCE_DB_URL=postgresql://madsci:madsci@madsci_postgres:5432/madsci_resources
+      - EVENT_SERVER_URL=http://event_manager:8001/
 
   data_manager:
     <<: *madsci-service
@@ -104,6 +130,12 @@ services:
     depends_on:
       - madsci_mongodb
       - event_manager
+    ports:
+      - "8004:8004"
+    environment:
+      - DATA_SERVER_URL=http://0.0.0.0:8004/
+      - DATA_MONGO_DB_URL=mongodb://madsci_mongodb:27017/
+      - EVENT_SERVER_URL=http://event_manager:8001/
 
   workcell_manager:
     <<: *madsci-service
@@ -115,6 +147,15 @@ services:
       - resource_manager
       - event_manager
       - location_manager
+    ports:
+      - "8005:8005"
+    environment:
+      - WORKCELL_SERVER_URL=http://0.0.0.0:8005/
+      - WORKCELL_MONGO_DB_URL=mongodb://madsci_mongodb:27017/
+      - WORKCELL_REDIS_HOST=madsci_redis
+      - EVENT_SERVER_URL=http://event_manager:8001/
+      - RESOURCE_SERVER_URL=http://resource_manager:8003/
+      - LOCATION_SERVER_URL=http://location_manager:8006/
 
   location_manager:
     <<: *madsci-service
@@ -124,16 +165,32 @@ services:
       - madsci_redis
       - event_manager
       - resource_manager
+    ports:
+      - "8006:8006"
+    environment:
+      - LOCATION_SERVER_URL=http://0.0.0.0:8006/
+      - LOCATION_REDIS_HOST=madsci_redis
+      - EVENT_SERVER_URL=http://event_manager:8001/
+      - RESOURCE_SERVER_URL=http://resource_manager:8003/
 
   # ---- Nodes ----
 
   high_viscosity_liquid_weighing_1:
     <<: *madsci-service
     container_name: high_viscosity_liquid_weighing_1
-    environment:
-      - NODE_NAME=high_viscosity_liquid_weighing_1
-      - NODE_MODULE_NAME=high_viscosity_liquid_weighing
-      - NODE_URL=http://localhost:2000
     command: python modules/high_viscosity_liquid_weighing/high_viscosity_liquid_weighing.py
     depends_on:
       - event_manager
+    ports:
+      - "2000:2000"
+    environment:
+      - NODE_NAME=high_viscosity_liquid_weighing_1
+      - NODE_MODULE_NAME=high_viscosity_liquid_weighing
+      - NODE_URL=http://0.0.0.0:2000/
+      - EVENT_SERVER_URL=http://event_manager:8001/
+      - RESOURCE_SERVER_URL=http://resource_manager:8003/
+
+networks:
+  madsci_net:
+    driver: bridge
+
