@@ -112,6 +112,20 @@ Lists all devices with their settings (port, step count, etc.).
 **`devices/*.py`** — one file per physical device  
 Implements device communication commands.
 
+**`devices/__init__.py`** — device registry  
+Exports `DEVICE_REGISTRY` used by node modules. Fake classes (no external dependencies) are imported unconditionally. Real hardware classes that depend on third-party libraries (e.g. `pyserial`, `sila2`) must be wrapped in `try/except ImportError` so the container can start in Fake mode without those packages installed.
+
+```python
+# Fake classes — always importable
+from .balance_proprietary_fake import BalanceProprietaryFake
+
+# Real classes — conditional import
+try:
+    from .balance_proprietary import BalanceProprietary
+except ImportError:
+    BalanceProprietary = None
+```
+
 **Experimental condition file (manual)** — anywhere on the local PC  
 Input files created by hand and passed in via `file_inputs` at submission time. Temporarily held by the Workcell Manager for the duration of the Step, then discarded.
 

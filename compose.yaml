@@ -184,11 +184,13 @@ services:
     ports:
       - "2000:2000"
     environment:
+      - PYTHONPATH=/home/madsci/auto_calibration_lab
       - NODE_NAME=high_viscosity_liquid_weighing_1
       - NODE_MODULE_NAME=high_viscosity_liquid_weighing
       - NODE_URL=http://0.0.0.0:2000/
       - EVENT_SERVER_URL=http://event_manager:8001/
       - RESOURCE_SERVER_URL=http://resource_manager:8003/
+      - DATA_SERVER_URL=http://data_manager:8004/
 
 networks:
   madsci_net:

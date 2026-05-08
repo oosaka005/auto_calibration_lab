@@ -16,19 +16,24 @@ class BalanceProprietary:
         port: str,
         baud_rate: int = 9600,
         timeout: float = 1.0,
+        host: Optional[str] = None,
+        ser2net_port: int = 2218,
         logger: Optional[logging.Logger] = None,
     ) -> None:
         self._logger = logger or logging.getLogger(__name__)
         self._lock = threading.Lock()
         self.status = "disconnected"
         self.current_mass_g: float = 0.0
+        # If host is set, connect via ser2net (RFC2217) over the network.
+        # Otherwise, connect directly to the local serial port.
+        serial_port = f"rfc2217://{host}:{ser2net_port}" if host else port
         self._serial = serial.Serial(
-            port=port,
+            port=serial_port,
             baudrate=baud_rate,
             timeout=timeout,
         )
         self.status = "connected"
-        self._logger.info(f"Balance: connected on {port}")
+        self._logger.info(f"Balance: connected on {serial_port}")
 
     def _read_response(self) -> str:
         """Read characters from serial until the unit indicator 'g' is received."""

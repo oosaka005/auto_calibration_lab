@@ -44,25 +44,30 @@ class HighViscosityDispenserProprietary:
         port: str,
         full_steps_per_rev: int,
         microstep_multiplier: int,
-        purge_speed_rps: float,
+        purge_speed_rps: Optional[float] = None,
         baud_rate: int = 9600,
+        host: Optional[str] = None,
+        ser2net_port: int = 2217,
         logger: Optional[logging.Logger] = None,
     ) -> None:
         self._logger = logger or logging.getLogger(__name__)
-        if purge_speed_rps > self.MAX_SPEED_RPS:
+        if purge_speed_rps is not None and purge_speed_rps > self.MAX_SPEED_RPS:
             raise ValueError(f"purge_speed_rps {purge_speed_rps} exceeds MAX_SPEED_RPS {self.MAX_SPEED_RPS}")
         self._lock = threading.Lock()
         self._full_steps_per_rev = full_steps_per_rev
         self._microstep_multiplier = microstep_multiplier
         self._purge_speed_rps = purge_speed_rps
-        self._serial = serial.Serial(port, baud_rate, timeout=1.0)
+        # If host is set, connect via ser2net (RFC2217) over the network.
+        # Otherwise, connect directly to the local serial port.
+        serial_port = f"rfc2217://{host}:{ser2net_port}" if host else port
+        self._serial = serial.Serial(serial_port, baud_rate, timeout=1.0)
         # Reset → reload EEPROM settings, then bring up to operable state.
         self._serial.write(b"\xb0")  # Reset (0xB0)
         time.sleep(0.01)             # Wait ≥10 ms for reset to complete
         self._energize()
         self._exit_safe_start()
         self.status = "connected"
-        self._logger.info(f"HighViscosityDispenser: connected on {port}")
+        self._logger.info(f"HighViscosityDispenser: connected on {serial_port}")
 
     def _energize(self) -> None:
         """Energize the motor coils (command 0x85)."""
@@ -144,8 +149,14 @@ class HighViscosityDispenserProprietary:
         with self._lock:
             self._rotate(rotations, speed_rps, +1)
 
-    def suck_back(self, volume_ml: float, speed_ml_per_min: float) -> None:
-        """Rotate backward to suck back `volume_ml` mL at `speed_ml_per_min` mL/min to prevent dripping."""
+    def suck_back(self, volume_ml: float, speed_ml_per_min: float, delay_s: float = 0.0) -> None:
+        """Rotate backward to suck back `volume_ml` mL at `speed_ml_per_min` mL/min to prevent dripping.
+
+        Args:
+            delay_s: Seconds to wait after the preceding dispense before starting backward rotation.
+        """
+        if delay_s > 0.0:
+            time.sleep(delay_s)
         rotations = volume_ml / self._ML_PER_REV
         speed_rps = (speed_ml_per_min / 60.0) / self._ML_PER_REV
         with self._lock:
@@ -153,6 +164,8 @@ class HighViscosityDispenserProprietary:
 
     def purge(self, volume_ml: float) -> None:
         """Rotate forward to purge `volume_ml` mL at the fixed purge speed to prime or clear the nozzle."""
+        if self._purge_speed_rps is None:
+            raise ValueError("purge_speed_rps is not set. Set it in devices.settings.yaml before calling purge().")
         rotations = volume_ml / self._ML_PER_REV
         with self._lock:
             self._rotate(rotations, self._purge_speed_rps, +1)

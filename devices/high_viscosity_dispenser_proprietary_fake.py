@@ -26,14 +26,14 @@ class HighViscosityDispenserProprietaryFake:
         port: str = "FAKE",
         full_steps_per_rev: int = 200,
         microstep_multiplier: int = 1,
-        purge_speed_rps: float = 0.5,
+        purge_speed_rps: Optional[float] = None,
         baud_rate: int = 9600,
         latency: float = 0.1,
         failure_rate: float = 0.0,
         logger: Optional[logging.Logger] = None,
     ) -> None:
         self._logger = logger or logging.getLogger(__name__)
-        if purge_speed_rps > self.MAX_SPEED_RPS:
+        if purge_speed_rps is not None and purge_speed_rps > self.MAX_SPEED_RPS:
             raise ValueError(f"purge_speed_rps {purge_speed_rps} exceeds MAX_SPEED_RPS {self.MAX_SPEED_RPS}")
         self._full_steps_per_rev = full_steps_per_rev
         self._microstep_multiplier = microstep_multiplier
@@ -63,14 +63,22 @@ class HighViscosityDispenserProprietaryFake:
         speed_rps = (speed_ml_per_min / 60.0) / self._ML_PER_REV
         self._rotate(rotations, speed_rps, +1)
 
-    def suck_back(self, volume_ml: float, speed_ml_per_min: float) -> None:
-        """Simulate backward rotation to suck back `volume_ml` mL at `speed_ml_per_min` mL/min."""
+    def suck_back(self, volume_ml: float, speed_ml_per_min: float, delay_s: float = 0.0) -> None:
+        """Simulate backward rotation to suck back `volume_ml` mL at `speed_ml_per_min` mL/min.
+
+        Args:
+            delay_s: Seconds to wait before starting backward rotation (simulated at full speed).
+        """
+        if delay_s > 0.0:
+            time.sleep(delay_s * self._latency)
         rotations = volume_ml / self._ML_PER_REV
         speed_rps = (speed_ml_per_min / 60.0) / self._ML_PER_REV
         self._rotate(rotations, speed_rps, -1)
 
     def purge(self, volume_ml: float) -> None:
         """Simulate purge rotation to dispense `volume_ml` mL at the fixed purge speed."""
+        if self._purge_speed_rps is None:
+            raise ValueError("purge_speed_rps is not set. Set it in devices.settings.yaml before calling purge().")
         rotations = volume_ml / self._ML_PER_REV
         self._rotate(rotations, self._purge_speed_rps, +1)
 

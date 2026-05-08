@@ -152,7 +152,7 @@ class HighViscosityLiquidWeighingNode(RestNode):
           - paused : stops before the next device command (requires _checkpoint in actions)
           - errored: set automatically when an unhandled error occurs
         """
-        if self.balance is not None and self.dispenser is not None:
+        if self.balance is not None and self.high_viscosity_dispenser is not None:
             for name in self.config.DEVICE_CLASSES:
                 device = getattr(self, name)
                 if device is not None:
@@ -293,8 +293,7 @@ class HighViscosityLiquidWeighingNode(RestNode):
 
         try:
             self.high_viscosity_dispenser.dispense(dispense_volume_ml, dispense_speed_ml_per_min)
-            time.sleep(suck_back_delay_s)
-            self.high_viscosity_dispenser.suck_back(suck_back_volume_ml, suck_back_speed_ml_per_min)
+            self.high_viscosity_dispenser.suck_back(suck_back_volume_ml, suck_back_speed_ml_per_min, delay_s=suck_back_delay_s)
             return ActionSucceeded(json_result={
                 "material_name": material_name,
                 "pressure_mpa": pressure_mpa,

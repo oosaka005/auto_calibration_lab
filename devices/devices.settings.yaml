@@ -12,21 +12,25 @@
 # All other fields are passed directly to the class __init__ as keyword arguments.
 
 balance:
-  _class: BalanceProprietary
+  _class: BalanceSila
   # _interface_type:   # Uncomment and set to "real" or "fake" to override node-level interface_type
-  # --- BalanceProprietary (serial) ---
-  port: null            # TODO: e.g. COM3 (used by BalanceProprietary)
+  # --- BalanceProprietary (serial / ser2net) ---
+  host: 100.124.19.65       # Tailscale IP of RPi. Set to null for direct local connection
+  ser2net_port: 2218        # ser2net port on RPi for balance (RFC2217 protocol)
+  port: /dev/ttyUSB0        # Used when host is null (direct local connection on RPi)
   baud_rate: 9600
   # --- BalanceSila (SiLA2 over network) ---
-  host: null            # TODO: e.g. 100.x.x.x (TailScale IP, used by BalanceSila)
+  host: 100.124.19.65            # TODO: e.g. 100.x.x.x (TailScale IP, used by BalanceSila)
   sila_port: 50052
   insecure: true
 
 high_viscosity_dispenser:
   _class: HighViscosityDispenserProprietary
   # _interface_type:   # Uncomment and set to "real" or "fake" to override node-level interface_type
-  port: /dev/serial0  # RPi5: GPIO14(TX)/GPIO15(RX). Windows: e.g. COM4
+  host: 100.124.19.65       # Tailscale IP of RPi. Set to null for direct local connection
+  ser2net_port: 2217        # ser2net port on RPi (RFC2217 protocol)
+  port: /dev/serial0        # Used when host is null (direct local connection on RPi)
   baud_rate: 9600
-  full_steps_per_rev: 1036   # 17HS19-1684S-PG5: 200 steps/rev × 5.18 gear ratio
-  microstep_multiplier: 1    # Full step (must match Tic T500 Step mode setting)
-  purge_speed_rps: null      # TODO: set after hardware test [rev/s], max 2.0
+  full_steps_per_rev: 1036  # 17HS19-1684S-PG5: 200 steps/rev × 5.18 gear ratio
+  microstep_multiplier: 8   # 1/8 step (must match Tic T500 Step mode setting)
+  purge_speed_rps: null     # TODO: set after hardware test [rev/s], max 2.0

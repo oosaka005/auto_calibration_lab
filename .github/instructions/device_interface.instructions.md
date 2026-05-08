@@ -11,6 +11,86 @@ applyTo: "modules/devices/**"
 - Internal helper methods must have a `_` prefix (e.g. `_send_command()`).
 - Public commands have no prefix (e.g. `tare()`, `read_weight()`).
 
+## Connection Patterns
+
+There are currently two connection patterns. Define the `__init__` signature corresponding to each pattern. All parameter values required for connection must be managed in `devices.settings.yaml` and must not be hardcoded.
+
+### Pattern 1: Serial Communication (Proprietary)
+
+Communicates directly with the device via a serial interface such as UART or RS-232. Uses pyserial's `serial.Serial`.
+
+Parameters to define in `__init__`:
+- `port: str` — serial port path on the RPi (e.g. `/dev/serial0`)
+- `baud_rate: int` — baud rate
+- `host: Optional[str]` — IP address of the RPi. If set, connects via ser2net using RFC2217.
+- `ser2net_port: int` — TCP port number exposed by ser2net. Assign a unique number per device on the same RPi.
+
+```python
+def __init__(
+    self,
+    port: str,
+    baud_rate: int = 9600,
+    host: Optional[str] = None,
+    ser2net_port: int = 2217,
+    logger: Optional[logging.Logger] = None,
+) -> None:
+    serial_port = f"rfc2217://{host}:{ser2net_port}" if host else port
+    self._serial = serial.Serial(serial_port, baud_rate, timeout=1.0)
+```
+
+RPi-side requirements:
+- Install ser2net and append a connection definition to `/etc/ser2net.yaml`:
+  ```yaml
+  connection: &<device_name>
+    accepter: tcp,<ser2net_port>
+    connector: serialdev,<serial_port>,<baud_rate>n81,local
+    options:
+      kickolduser: true
+  ```
+- Enable auto-start with `sudo systemctl enable --now ser2net`.
+
+---
+
+### Pattern 2: SiLA2 (Sila)
+
+The SiLA2 server handles the physical connection to the device and exposes it over gRPC. Uses `sila2.client.SilaClient`. Unlike Pattern 1, the node can run on the PC since the physical connection is managed by the SiLA2 server.
+
+Parameters to define in `__init__`:
+- `host: str` — IP address of the host running the SiLA2 server
+- `sila_port: int` — SiLA2 server port number (default: 50052)
+- `insecure: bool` — set to `True` to disable TLS (use `True` in development environments)
+
+```python
+def __init__(
+    self,
+    host: str,
+    sila_port: int = 50052,
+    insecure: bool = True,
+    logger: Optional[logging.Logger] = None,
+) -> None:
+    self._client = SilaClient(address=host, port=sila_port, insecure=insecure)
+```
+
+RPi-side requirements:
+- Register the SiLA2 server as a systemd service and enable it:
+  ```ini
+  [Unit]
+  Description=<Device> SiLA2 Server
+  After=network.target
+
+  [Service]
+  Type=simple
+  User=<user>
+  WorkingDirectory=<path/to/server>
+  ExecStart=<path/to/.venv/bin/python> -m <server_module> --ip-address 0.0.0.0 --port <sila_port> --insecure
+  Restart=on-failure
+  RestartSec=5
+
+  [Install]
+  WantedBy=multi-user.target
+  ```
+- `--ip-address 0.0.0.0` is required to accept connections from external hosts.
+
 ## Command Conventions
 
 - Name commands after the device function they perform (verb-based).

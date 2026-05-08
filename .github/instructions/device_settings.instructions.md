@@ -41,6 +41,42 @@ No code changes are needed. Config fields, Node attributes, startup, and shutdow
 Remove the entry from `node.settings.yaml` devices list and restart the node.
 The `devices.settings.yaml` section can remain (other nodes may use it).
 
+## Connection Settings
+
+All device connection settings are managed centrally in `devices.settings.yaml`. Connection parameters must be defined here and must not be hardcoded. Required fields differ by connection pattern.
+
+### Pattern 1: Serial Communication (Proprietary)
+
+```yaml
+<device_name>:
+  _class: <DeviceName>Proprietary
+  host: <IP address>     # IP address of the RPi (LAN IP or VPN IP; see below)
+  ser2net_port: <port>   # TCP port exposed by ser2net on the RPi (assign a unique number per device)
+  port: <serial_port>    # serial port path on the RPi (e.g. /dev/serial0)
+  baud_rate: 9600
+```
+
+### Pattern 2: SiLA2 (Sila)
+
+```yaml
+<device_name>:
+  _class: <DeviceName>Sila
+  host: <IP address>     # IP address of the RPi running the SiLA2 server (LAN IP or VPN IP; see below)
+  sila_port: 50052
+  insecure: true
+```
+
+### IP Address
+
+The IP address to set in `host` depends on how the PC and RPi are connected.
+
+| Connection type | Value for `host` |
+|---|---|
+| Same LAN (wired/WiFi) | LAN IP address of the RPi (e.g. `192.168.x.x`) |
+| Via VPN (e.g. Tailscale) | VPN IP address of the RPi (e.g. `100.x.x.x`) |
+
+In either case, only the `host` field needs to be updated to switch between connection types.
+
 ## Notes
 
 - `_class` must exactly match a key in `devices/__init__.py DEVICE_REGISTRY`.

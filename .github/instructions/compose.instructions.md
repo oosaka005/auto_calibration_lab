@@ -54,6 +54,7 @@ Rules for node entries:
 - `command:` path must be relative to `working_dir` and point to the node's Python file
 - Always include `depends_on: - event_manager`
 - Always include `EVENT_SERVER_URL` and `RESOURCE_SERVER_URL` pointing to container names
+- Always include `PYTHONPATH=<working_dir>` (e.g. `/home/madsci/auto_calibration_lab`). This is required because the node script runs from `modules/<node_name>/`, so the project root (where `devices/` lives) is not on Python's import path by default.
 
 ## Service Structure
 
