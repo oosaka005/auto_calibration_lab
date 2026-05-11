@@ -5,6 +5,18 @@ applyTo: "compose.yaml"
 
 # compose.yaml Rules
 
+## Startup Command
+
+Always use `--build` when starting services:
+
+```bash
+docker compose up -d --build
+```
+
+- `--build` rebuilds the image only when `Dockerfile` or `devices/requirements.txt` has changed (Docker layer cache makes this fast).
+- After the first `docker compose up -d --build`, containers auto-restart on PC reboot (`restart: unless-stopped`). No manual action needed unless `docker compose down` was run.
+- Use `docker compose down` only when intentionally stopping the system.
+
 ## What Must NOT Be Changed (MADSci Framework Rules)
 
 The following are fixed by the MADSci framework. Changing them will break the system:
@@ -22,7 +34,7 @@ The following are fixed by the MADSci framework. Changing them will break the sy
 |------|----------------|
 | Left side of `volumes:` (`.:/home/madsci/<lab_name>`) | When renaming the project folder |
 | `working_dir:` | Must match the left side of `volumes:` above |
-| `image: ghcr.io/ad-sdl/madsci:latest` | When pinning to a specific version (recommended for production) |
+| `build: .` | Only if Dockerfile is moved to a subdirectory |
 | `${MONGODB_PORT:-27017}` etc. | When ports conflict with other services on the host PC |
 
 ## The Only Section to Add Freely: Nodes
@@ -62,7 +74,7 @@ All MADSci services use a shared anchor for common configuration:
 
 ```yaml
 x-madsci-service: &madsci-service
-  image: ghcr.io/ad-sdl/madsci:latest
+  build: .
   env_file:
     - ./.env
   volumes:
@@ -73,6 +85,8 @@ x-madsci-service: &madsci-service
   networks:
     - madsci_net
 ```
+
+`build: .` references the `Dockerfile` in the project root, which extends the MADSci base image by installing hardware-specific libraries from `devices/requirements.txt`. Run `docker compose build` after modifying `devices/requirements.txt`.
 
 Each manager/node service uses `<<: *madsci-service` to inherit this configuration. `restart: unless-stopped` is inherited from this anchor — do NOT add it again individually to managers or nodes.
 

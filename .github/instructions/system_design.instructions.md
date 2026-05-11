@@ -113,18 +113,36 @@ Lists all devices with their settings (port, step count, etc.).
 Implements device communication commands.
 
 **`devices/__init__.py`** — device registry  
-Exports `DEVICE_REGISTRY` used by node modules. Fake classes (no external dependencies) are imported unconditionally. Real hardware classes that depend on third-party libraries (e.g. `pyserial`, `sila2`) must be wrapped in `try/except ImportError` so the container can start in Fake mode without those packages installed.
+Exports `DEVICE_REGISTRY` used by node modules. All device classes (both fake and real) are imported directly. Hardware-specific libraries are guaranteed to be available because the project uses a custom Dockerfile that installs them at build time.
 
 ```python
-# Fake classes — always importable
 from .balance_proprietary_fake import BalanceProprietaryFake
+from .balance_proprietary import BalanceProprietary
 
-# Real classes — conditional import
-try:
-    from .balance_proprietary import BalanceProprietary
-except ImportError:
-    BalanceProprietary = None
+DEVICE_REGISTRY: dict[str, type] = {
+    "BalanceProprietaryFake": BalanceProprietaryFake,
+    "BalanceProprietary": BalanceProprietary,
+}
 ```
+
+**`devices/requirements.txt`** — device library dependencies  
+Lists hardware-specific Python libraries (e.g. `pyserial`, `sila2`). Installed automatically during Docker image build via the project `Dockerfile`. When adding a device that requires a new library, add it here and run `docker compose build`.
+
+**`Dockerfile`** — project root  
+Extends the MADSci base image (`ghcr.io/ad-sdl/madsci:latest`) by installing `devices/requirements.txt`. This ensures all device libraries are available in the container.
+
+**Dockerfile rules:**
+- The base image uses a virtualenv at `/home/madsci/MADSci/.venv` (created by `uv`, not `pip`). The entrypoint activates this virtualenv at runtime.
+- Libraries MUST be installed into this virtualenv. Use `uv pip install --python /home/madsci/MADSci/.venv/bin/python`. Do NOT use plain `pip install` (that installs to system Python, which is not used at runtime).
+- Template:
+  ```dockerfile
+  FROM ghcr.io/ad-sdl/madsci:latest
+  COPY devices/requirements.txt /tmp/device-requirements.txt
+  RUN uv pip install --python /home/madsci/MADSci/.venv/bin/python \
+      -r /tmp/device-requirements.txt && \
+      rm /tmp/device-requirements.txt
+  ```
+- This pattern applies to any MADSci-based project, not just this one.
 
 **Experimental condition file (manual)** — anywhere on the local PC  
 Input files created by hand and passed in via `file_inputs` at submission time. Temporarily held by the Workcell Manager for the duration of the Step, then discarded.

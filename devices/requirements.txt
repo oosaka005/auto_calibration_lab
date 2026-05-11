@@ -1,0 +1,6 @@
+# Hardware-specific libraries required by real device interfaces.
+# Installed automatically during Docker image build (see Dockerfile).
+# Add a new line when introducing a device that requires an additional library.
+
+pyserial>=3.5
+sila2>=0.10.0

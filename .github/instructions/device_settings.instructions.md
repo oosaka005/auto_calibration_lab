@@ -52,7 +52,7 @@ All device connection settings are managed centrally in `devices.settings.yaml`.
   _class: <DeviceName>Proprietary
   host: <IP address>     # IP address of the RPi (LAN IP or VPN IP; see below)
   ser2net_port: <port>   # TCP port exposed by ser2net on the RPi (assign a unique number per device)
-  port: <serial_port>    # serial port path on the RPi (e.g. /dev/serial0)
+  port: <serial_port>    # serial port path on the RPi (e.g. /dev/ttyAMA0 on RPi5; /dev/serial0 on RPi4)
   baud_rate: 9600
 ```
 

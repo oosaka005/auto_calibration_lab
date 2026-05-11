@@ -3,23 +3,11 @@ from .balance_proprietary_fake import BalanceProprietaryFake
 from .balance_sila_fake import BalanceSilaFake
 from .high_viscosity_dispenser_proprietary_fake import HighViscosityDispenserProprietaryFake
 
-# Real interfaces require optional hardware libraries (pyserial, sila2).
-# They are imported conditionally so the node can start without them when
-# running in fake mode (interface_type: fake in node.settings.yaml).
-try:
-    from .balance_proprietary import BalanceProprietary
-except ImportError:
-    BalanceProprietary = None  # type: ignore[assignment,misc]
-
-try:
-    from .balance_sila import BalanceSila
-except ImportError:
-    BalanceSila = None  # type: ignore[assignment,misc]
-
-try:
-    from .high_viscosity_dispenser_proprietary import HighViscosityDispenserProprietary
-except ImportError:
-    HighViscosityDispenserProprietary = None  # type: ignore[assignment,misc]
+# Real interfaces require hardware-specific libraries (pyserial, sila2).
+# These are installed in the Docker image via devices/requirements.txt (see Dockerfile).
+from .balance_proprietary import BalanceProprietary
+from .balance_sila import BalanceSila
+from .high_viscosity_dispenser_proprietary import HighViscosityDispenserProprietary
 
 # Maps the class name string (written in devices.settings.yaml) to the class itself.
 # Add a new entry here when adding a new device class.
@@ -32,15 +20,10 @@ DEVICE_REGISTRY: dict[str, type] = {
     "BalanceProprietaryFake": BalanceProprietaryFake,
     "BalanceSilaFake": BalanceSilaFake,
     "HighViscosityDispenserProprietaryFake": HighViscosityDispenserProprietaryFake,
+    "BalanceProprietary": BalanceProprietary,
+    "BalanceSila": BalanceSila,
+    "HighViscosityDispenserProprietary": HighViscosityDispenserProprietary,
 }
-
-# Register real interfaces only when their libraries are available.
-if BalanceProprietary is not None:
-    DEVICE_REGISTRY["BalanceProprietary"] = BalanceProprietary
-if BalanceSila is not None:
-    DEVICE_REGISTRY["BalanceSila"] = BalanceSila
-if HighViscosityDispenserProprietary is not None:
-    DEVICE_REGISTRY["HighViscosityDispenserProprietary"] = HighViscosityDispenserProprietary
 
 __all__ = [
     "BalanceProprietary",

@@ -1,7 +1,7 @@
 # Auto Calibration Lab - Docker Compose
 #
 # Usage:
-#   docker compose up -d
+#   docker compose up -d --build
 #
 # Infrastructure (MongoDB, PostgreSQL) is included below.
 # Credentials are set to defaults (madsci/madsci) — change for production use.
@@ -10,7 +10,7 @@
 # Note: network_mode: host is replaced with bridge networking + explicit ports
 # to ensure services are accessible from the Windows host on Docker Desktop.
 x-madsci-service: &madsci-service
-  image: ghcr.io/ad-sdl/madsci:latest
+  build: .
   env_file:
     - ./.env
   volumes:

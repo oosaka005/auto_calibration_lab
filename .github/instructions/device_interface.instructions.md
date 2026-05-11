@@ -17,13 +17,18 @@ There are currently two connection patterns. Define the `__init__` signature cor
 
 ### Pattern 1: Serial Communication (Proprietary)
 
-Communicates directly with the device via a serial interface such as UART or RS-232. Uses pyserial's `serial.Serial`.
+Communicates directly with the device via a serial interface such as UART or RS-232. Uses pyserial's `serial.serial_for_url`.
 
 Parameters to define in `__init__`:
-- `port: str` — serial port path on the RPi (e.g. `/dev/serial0`)
+- `port: str` — serial port path on the RPi (e.g. `/dev/ttyAMA0` on RPi5; `/dev/serial0` on RPi4)
 - `baud_rate: int` — baud rate
-- `host: Optional[str]` — IP address of the RPi. If set, connects via ser2net using RFC2217.
+- `host: Optional[str]` — IP address of the RPi. If set, connects via ser2net over raw TCP (`socket://`).
 - `ser2net_port: int` — TCP port number exposed by ser2net. Assign a unique number per device on the same RPi.
+
+**Connection rules:**
+- Always use `serial.serial_for_url()`, never `serial.Serial()`. `serial_for_url()` handles both URL schemes (`socket://`, `rfc2217://`) and local port names (`COM3`, `/dev/ttyAMA0`).
+- Use `socket://` (not `rfc2217://`) when ser2net is configured with `accepter: tcp`. The baud rate is fixed in ser2net's `connector` line and does not need to be negotiated.
+- Use `rfc2217://` only when ser2net is configured with `accepter: telnet(rfc2217)`.
 
 ```python
 def __init__(
@@ -34,8 +39,9 @@ def __init__(
     ser2net_port: int = 2217,
     logger: Optional[logging.Logger] = None,
 ) -> None:
-    serial_port = f"rfc2217://{host}:{ser2net_port}" if host else port
-    self._serial = serial.Serial(serial_port, baud_rate, timeout=1.0)
+    # socket:// for raw TCP (ser2net tcp mode). Baud rate is set in ser2net config.
+    serial_port = f"socket://{host}:{ser2net_port}" if host else port
+    self._serial = serial.serial_for_url(serial_port, baud_rate, timeout=1.0)
 ```
 
 RPi-side requirements:
@@ -161,7 +167,7 @@ def check_status(self) -> None:
 
 ## Registration
 
-- After creating a new device class, add an entry to `DEVICE_REGISTRY` in `devices/__init__.py`:
+- After creating a new device class, add an import and an entry to `DEVICE_REGISTRY` in `devices/__init__.py`:
   ```python
   from .my_device import MyDevice
 
@@ -172,6 +178,26 @@ def check_status(self) -> None:
   ```
 - The key must be the class name exactly as it will be written in `devices.settings.yaml` under `_class:`.
 - Without this entry the node cannot resolve the class from the settings file.
+- Import all device classes **directly** (no `try/except ImportError`). All required libraries are guaranteed to be available in the Docker image.
+
+## Library Management
+
+Hardware-specific libraries (e.g. `pyserial`, `sila2`) are managed centrally:
+
+| File | Role |
+|---|---|
+| `devices/requirements.txt` | Single source of truth for device libraries |
+| `Dockerfile` | Extends the MADSci base image by `pip install -r devices/requirements.txt` |
+| `compose.yaml` | Uses `build: .` to build the project-specific image |
+
+**When adding a device that requires a new library:**
+1. Add the library to `devices/requirements.txt`.
+2. Rebuild the image: `docker compose build`.
+
+**Do NOT:**
+- Wrap imports in `try/except ImportError` — all libraries are installed at image build time.
+- Install libraries at container startup (e.g. in `command:`) — this is slow and unreliable.
+- Hardcode library versions unless a specific version is required for compatibility.
 
 ## Naming Conventions
 
@@ -192,7 +218,7 @@ def check_status(self) -> None:
 Follow the MADSci fake interface conventions (`docs/guides/integrator/04-fake-interfaces.md`):
 
 - **Same API**: Method signatures (arguments and return types) must be identical to the real interface.
-- **No hardware dependencies**: Do not import or instantiate `serial.Serial` or any hardware library. Set `status = "connected"` immediately in `__init__`.
+- **No hardware dependencies**: Do not import or instantiate `serial.serial_for_url` or any hardware library. Set `status = "connected"` immediately in `__init__`.
 - **Same argument validation**: Preserve all `ValueError`/`Exception` checks from the real interface (e.g. speed limits).
 - **Same instance attributes**: Declare and update the same instance attributes as the real interface (e.g. `current_mass_g`).
 - **Realistic timing**: Accept a `latency: float = 0.1` parameter in `__init__` and scale `time.sleep()` calls by it (e.g. `time.sleep(settle_time * self.latency)`).

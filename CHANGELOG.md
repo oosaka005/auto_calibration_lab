@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased] - 2026-05-11
+
+### Fixed
+- `devices/high_viscosity_dispenser_proprietary.py`: Updated default port from `/dev/serial0` to `/dev/ttyAMA0` for RPi5 compatibility
+- Added RPi5-specific UART setup notes to docstring: `dtoverlay=uart0-pi5`, `dtoverlay=disable-bt`, and `uart0-gpio-setup.service`
+- `dispenser_check.ipynb`: Updated ser2net setup instructions to use `/dev/ttyAMA0` instead of `/dev/serial0`
+
+**Root cause of dispenser not moving from PC (ser2net path):**
+- RPi5 requires `dtoverlay=uart0-pi5` (not `dtparam=uart0=on`) to map UART0 to GPIO14/15
+- Without this, `serial0` pointed to `ttyAMA10` (not connected to external pins)
+- Additionally, `/etc/ser2net.yaml` connector was still set to `/dev/serial0`
+- Fix: update both `/boot/firmware/config.txt` (RPi5 overlays) and `/etc/ser2net.yaml` connector to `/dev/ttyAMA0`
+
 ## [Unreleased] - 2026-04-30
 
 ### Added

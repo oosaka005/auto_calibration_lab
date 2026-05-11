@@ -29,7 +29,7 @@ high_viscosity_dispenser:
   # _interface_type:   # Uncomment and set to "real" or "fake" to override node-level interface_type
   host: 100.124.19.65       # Tailscale IP of RPi. Set to null for direct local connection
   ser2net_port: 2217        # ser2net port on RPi (RFC2217 protocol)
-  port: /dev/serial0        # Used when host is null (direct local connection on RPi)
+  port: /dev/ttyAMA0       # Used when host is null (direct local connection on RPi); RPi5 requires dtoverlay=uart0-pi5 + disable-bt in config.txt
   baud_rate: 9600
   full_steps_per_rev: 1036  # 17HS19-1684S-PG5: 200 steps/rev × 5.18 gear ratio
   microstep_multiplier: 8   # 1/8 step (must match Tic T500 Step mode setting)

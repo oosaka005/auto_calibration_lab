@@ -8,9 +8,16 @@ Serial command protocol is used (not native USB).
     GPIO14 (pin 8,  TX) --> Tic RX
     GPIO15 (pin 10, RX) <-- Tic TX
     GND    (pin 6)      --> Tic GND
-    port = "/dev/serial0"
+    port = "/dev/ttyAMA0"
     Enable the serial port via raspi-config:
         Interface Options -> Serial Port -> login shell: No, hardware enabled: Yes
+
+    RPi5-specific setup required (RPi4 raspi-config alone is insufficient):
+        /boot/firmware/config.txt:
+            dtoverlay=uart0-pi5     # RPi5: maps UART0 to GPIO14/15 (replaces dtparam=uart0=on)
+            dtoverlay=disable-bt    # detach Bluetooth from GPIO14/15
+        systemd service (uart0-gpio-setup.service):
+            sets GPIO14/15 to ALT4 (UART) on boot
 
 --- Tic Control Center (one-time USB setup) ---
 
@@ -57,10 +64,12 @@ class HighViscosityDispenserProprietary:
         self._full_steps_per_rev = full_steps_per_rev
         self._microstep_multiplier = microstep_multiplier
         self._purge_speed_rps = purge_speed_rps
-        # If host is set, connect via ser2net (RFC2217) over the network.
+        # If host is set, connect via ser2net (raw TCP) over the network.
+        # ser2net's accepter uses tcp mode, so we use socket:// (not rfc2217://).
+        # Baud rate is configured in ser2net's connector line, not negotiated here.
         # Otherwise, connect directly to the local serial port.
-        serial_port = f"rfc2217://{host}:{ser2net_port}" if host else port
-        self._serial = serial.Serial(serial_port, baud_rate, timeout=1.0)
+        serial_port = f"socket://{host}:{ser2net_port}" if host else port
+        self._serial = serial.serial_for_url(serial_port, baud_rate, timeout=1.0)
         # Reset → reload EEPROM settings, then bring up to operable state.
         self._serial.write(b"\xb0")  # Reset (0xB0)
         time.sleep(0.01)             # Wait ≥10 ms for reset to complete

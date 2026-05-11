@@ -23,7 +23,7 @@ The file always contains exactly **two classes**:
 
 ## Standard Imports
 
-Every Node file uses the following imports. Add `Path` and `FileDataPoint` only when the action generates files.
+Every Node file uses the following imports. Add `Path` only when the action generates files.
 
 ```python
 import logging
@@ -32,7 +32,6 @@ from pathlib import Path        # only if the action generates files
 from typing import ClassVar, Optional
 
 from madsci.common.types.action_types import ActionFailed, ActionSucceeded
-from madsci.common.types.datapoint_types import FileDataPoint, ValueDataPoint  # only if using submit_datapoint()
 from madsci.common.types.node_types import RestNodeConfig
 from madsci.node_module.helpers import action
 from madsci.node_module.rest_node_module import RestNode
@@ -146,11 +145,13 @@ def shutdown_handler(self) -> None:
         getattr(self, name).close()
 ```
 
-### `state_handler(self) -> None`
+### `state_handler(self) -> dict[str, Any]`
 Called automatically every ~2 seconds (`state_update_interval`). **Always read all device values** — what to display or save is a separate concern.
 
+The return value is **not used** by the framework (`_update_state` discards it). The purpose of this method is to set `self.node_state`. The `-> dict[str, Any]` annotation follows MADSci's example/template convention.
+
 ```python
-def state_handler(self) -> None:
+def state_handler(self) -> dict[str, Any]:
     self.node_state = {
         "balance_status": self.balance.status,
         "balance_last_weight_g": self.balance.current_mass_g,
@@ -210,7 +211,7 @@ def dispense_target_mass(self, target_g: float, speed_rps: float) -> ActionSucce
         return ActionFailed(errors=[e])  # exception type, message, and timestamp are all recorded
 ```
 
-- `json_result` in `ActionSucceeded` is available for `feed_forward` in the Workflow YAML
+- `json_result` in `ActionSucceeded` is used for `feed_forward` in the Workflow YAML, and is **automatically saved** to the Data Manager when run via a Workflow (see Data Saving below)
 - If an unhandled exception escapes the action (e.g. a bug), the framework sets `errored = True` — the node will not accept new actions until `POST /admin/reset` is called
 
 Admin commands are sent via `POST /admin/{command}`. Some are implemented by the framework; others must be implemented in the Node class.
@@ -271,75 +272,74 @@ If implemented, also check `self.node_status.stopped` in action loops the same w
 
 ## Data Saving
 
-There are two distinct data saving patterns:
+### Automatic saving (via Workflow)
 
-| Pattern | Where stored | Lifetime | How |
+When an action is executed **via a Workflow**, the Workcell Engine automatically saves the action's return data to the Data Manager. No explicit save call is needed in the action code.
+
+| Return field | Saved as | Label | Backend |
 |---|---|---|---|
-| **Temporary** | Workcell Manager | Duration of workflow run | `ActionSucceeded(json_result=..., files=...)` |
-| **Persistent** | Data Manager | Permanently | `self.data_client.submit_datapoint(...)` |
-
----
-
-### Temporary: `ActionSucceeded` fields
-
-Use these fields to pass data to the next step via `feed_forward`, or to record results in the workflow run history (the per-run log of each step's inputs and outputs stored in the Workcell Manager):
-
-| Field | Type | When to use |
-|---|---|---|
-| `json_result` | Any JSON-serializable value (dict, list, number, etc.) | Measurement results, calculated values |
-| `files` | `{"key": Path(...)}` | Files generated during the action |
+| `json_result` (dict, number, list, etc.) | `ValueDataPoint` | `"json_result"` (fixed) | MongoDB |
+| `files` (`Path` or `ActionFiles` subclass) | `FileDataPoint` | file key name | MinIO or local disk |
 
 ```python
-# JSON result — available for feed_forward in the Workflow YAML
-return ActionSucceeded(json_result={"mass_g": 1.23})
-
-# File result
-return ActionSucceeded(files={"report": Path("/tmp/report.csv")})
-
-# Both
-return ActionSucceeded(json_result={"mass_g": 1.23}, files={"log": Path("/tmp/log.txt")})
-```
-
----
-
-### Persistent: `submit_datapoint()`
-
-Saving to the Data Manager is **never automatic** — it must be called explicitly inside the Action. Each call saves one datapoint; call it multiple times to save both a value and a file.
-
-| Class | Fields | When to use |
-|---|---|---|
-| `ValueDataPoint` | `label`, `value` | Any JSON-serializable value (numbers, dicts, lists) |
-| `FileDataPoint` | `label`, `path` | Files generated during the action |
-
-```python
-from madsci.common.types.datapoint_types import ValueDataPoint, FileDataPoint
-
 @action
-def calibrate_density(self, ...) -> ActionSucceeded:
-    result = {"g_per_rotation": 0.12, "data_points": [...]}
-    log_path = Path("/tmp/calibration_log.csv")
-
-    # Persist value to Data Manager
-    self.data_client.submit_datapoint(
-        ValueDataPoint(label="density_g_per_rot", value=result)
-    )
-
-    # Persist file to Data Manager (separate call)
-    self.data_client.submit_datapoint(
-        FileDataPoint(label="calibration_log", path=log_path)
-    )
-
-    # Also return for workflow feed_forward (Workcell Manager, temporary)
-    return ActionSucceeded(json_result=result)
+def calibrate_dispenser(self, material_name: str) -> ActionSucceeded:
+    try:
+        result = {"g_per_rev": 0.12, "speed_ml_per_min": 2.0}
+        return ActionSucceeded(json_result=result)
+        # ↑ Workcell Engine saves ValueDataPoint(label="json_result", value=result) automatically
+    except Exception as e:
+        return ActionFailed(errors=[e])
 ```
 
-Specify only `label` and `value` (or `path`). The following are attached automatically:
+The saved data is also used by `feed_forward` to pass values to subsequent Workflow steps.
+
+> **When called outside a Workflow** (e.g. from a notebook via REST API or Swagger UI), the Workcell Engine is not involved — `json_result` is returned in the HTTP response but **not** saved to the Data Manager.
+
+Ownership metadata is attached automatically to saved datapoints:
 - `datapoint_id` — ULID, auto-generated
 - `data_timestamp` — time of saving
-- `ownership_info` — `experiment_id`, `campaign_id`, `workflow_id`, `step_id`, `node_id`, `workcell_id`, `user_id`, `manager_id`, `project_id`, `lab_id` — populated automatically from Workflow execution context; all `null` when called directly (e.g. from Swagger UI)
+- `ownership_info` — `experiment_id`, `campaign_id`, `workflow_id`, `step_id`, `node_id`, `workcell_id`, `user_id`, `manager_id`, `project_id`, `lab_id`
 
-Fields that the system cannot know must be stored manually inside `value` (e.g. `material_name`, `pressure_mpa`).
+Fields that the system cannot know must be stored inside `value` (e.g. `material_name`, `pressure_mpa`).
 
-The Data Manager selects the storage backend automatically:
-- `ValueDataPoint` → MongoDB
-- `FileDataPoint` → MinIO (if configured), otherwise local disk
+---
+
+### Explicit saving (optional)
+
+To save additional data beyond what `json_result` captures (e.g. intermediate results, detailed logs with a custom label), call one of these convenience methods inside the action:
+
+| Method | What it does |
+|---|---|
+| `self.create_and_upload_value_datapoint(value=..., label=...)` | Creates a `ValueDataPoint` and uploads it to the Data Manager |
+| `self.create_and_upload_file_datapoint(file_path=..., label=...)` | Creates a `FileDataPoint` and uploads it to the Data Manager |
+
+```python
+@action
+def calibrate_density(self, material_name: str) -> ActionSucceeded:
+    try:
+        result = {"g_per_rotation": 0.12, "data_points": [...]}
+
+        # Optional: save with a custom label (in addition to the automatic json_result save)
+        self.create_and_upload_value_datapoint(
+            value=result,
+            label="density_calibration",
+        )
+
+        return ActionSucceeded(json_result=result)
+    except Exception as e:
+        return ActionFailed(errors=[e])
+```
+
+These explicit saves are independent of the automatic `json_result` save. In this project, most actions only need `json_result` — explicit saving is rarely necessary.
+
+---
+
+### Summary
+
+| Scenario | What to do |
+|---|---|
+| Return results for workflow use and automatic persistence | `return ActionSucceeded(json_result={...})` |
+| Save additional data with a custom label | `self.create_and_upload_value_datapoint(...)` |
+| Return a file | `return ActionSucceeded(files=Path("/path/to/file"))` |
+| Save a file with a custom label | `self.create_and_upload_file_datapoint(...)` |
