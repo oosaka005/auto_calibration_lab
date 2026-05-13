@@ -36,7 +36,7 @@ steps:
       args:
         rotations: purge_rotations
 
-  - key: tare_for_calibration
+  - key: tare_1
     name: Tare balance before density calibration
     node: high_viscosity_liquid_weighing
     action: tare
@@ -51,7 +51,7 @@ steps:
         num_increments: num_increments
         speed_rps: calibration_speed_rps
 
-  - key: tare_for_dispense
+  - key: tare_2
     name: Tare balance before dispensing
     node: high_viscosity_liquid_weighing
     action: tare

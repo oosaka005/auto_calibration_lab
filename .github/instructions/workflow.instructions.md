@@ -126,6 +126,8 @@ Human-readable display name for the step. Shown in the Squid Dashboard and logs.
 A short snake_case identifier for the step.
 - Must be unique within the workflow
 - Referenced by `feed_forward` parameters via `step: {key}` and by `data_labels`
+- **Naming rule:** Use the `action` name as-is (e.g., `key: calibrate_speed` when `action: calibrate_speed`). This ensures that the same action produces datapoints with a consistent `step_id` across different workflows, enabling cross-workflow comparison via the Data Manager.
+- **Exception:** When the same action appears more than once in a workflow, append a sequential number: `{action}_{n}` (e.g., `tare_1`, `tare_2`).
 
 ### `action` (Required)
 The name of the Action to invoke on the target Node.

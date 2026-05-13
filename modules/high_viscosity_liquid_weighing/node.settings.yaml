@@ -9,5 +9,5 @@ devices:
   - balance
   - high_viscosity_dispenser
 
-interface_type: fake
+interface_type: real
 

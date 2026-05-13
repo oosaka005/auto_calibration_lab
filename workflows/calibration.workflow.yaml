@@ -28,7 +28,7 @@ parameters:
       default: 10.0
 
 steps:
-  - key: tare_for_density
+  - key: tare
     name: Tare balance before density calibration
     node: high_viscosity_liquid_weighing
     action: tare

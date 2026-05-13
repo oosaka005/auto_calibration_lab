@@ -15,8 +15,6 @@ from typing import Annotated, Any, ClassVar, Optional
 
 import yaml
 from madsci.common.types.action_types import ActionFailed, ActionSucceeded
-from madsci.common.types.base_types import Error
-from madsci.common.types.datapoint_types import ValueDataPoint
 from madsci.common.types.node_types import RestNodeConfig
 from madsci.node_module.helpers import action
 from madsci.node_module.rest_node_module import RestNode
@@ -182,17 +180,20 @@ class HighViscosityLiquidWeighingNode(RestNode):
         speed_start_ml_per_min: float,
         speed_end_ml_per_min: float,
         speed_step_ml_per_min: float,
-        suck_back_volume_ml: float,
-        suck_back_speed_ml_per_min: float,
-    ) -> ActionSucceeded:
+    ) -> dict:
         """Measure g/rev at increasing speeds to characterize dispenser performance.
 
         For each speed step, tares the balance, dispenses a fixed volume,
         reads the resulting mass, and calculates grams per revolution and density.
         Density [g/cm³] = mass_g / volume_per_step_ml.
+
+        Suck-back params are read from dispensing_params[high_viscosity_dispenser][suck_back]
+        in the Resource Manager. Register them via material_management.ipynb before running.
         """
         try:
-            self.resource_client.query_resource(resource_name=material_name)
+            material = self.resource_client.query_resource(
+                resource_name=material_name,
+            )
         except requests.HTTPError as e:
             if e.response is not None and e.response.status_code == 404:
                 return ActionFailed(
@@ -202,53 +203,223 @@ class HighViscosityLiquidWeighingNode(RestNode):
         except Exception as e:
             return ActionFailed(errors=[e])
 
-        ml_per_rev = self.high_viscosity_dispenser._ML_PER_REV
+        attrs = material.attributes or {}
+        device_params = attrs.get("dispensing_params", {}).get("high_viscosity_dispenser", {})
+        suck_back = device_params.get("suck_back", {})
+        suck_back_volume_ml = suck_back.get("volume_ml")
+        suck_back_delay_s = suck_back.get("delay_s")
+        if suck_back_volume_ml is None or suck_back_delay_s is None:
+            return ActionFailed(
+                errors=[ValueError(
+                    f"Material '{material_name}' has no dispensing_params.high_viscosity_dispenser.suck_back. "
+                    "Register them via material_management.ipynb before calibrating."
+                )]
+            )
+
         results = []
-        speed_ml_per_min = speed_start_ml_per_min
+        n_steps = round((speed_end_ml_per_min - speed_start_ml_per_min) / speed_step_ml_per_min) + 1
         try:
-            while speed_ml_per_min <= speed_end_ml_per_min + 1e-9:
-                self.balance.tare()
+            for i in range(n_steps):
+                speed_ml_per_min = round(speed_start_ml_per_min + i * speed_step_ml_per_min, 4)
 
                 while self.node_status.paused:
                     time.sleep(0.1)
+
+                self.balance.tare()
+
                 self.high_viscosity_dispenser.dispense(volume_per_step_ml, speed_ml_per_min)
-                self.high_viscosity_dispenser.suck_back(suck_back_volume_ml, suck_back_speed_ml_per_min)
+                self.high_viscosity_dispenser.suck_back(suck_back_volume_ml, delay_s=suck_back_delay_s)
 
                 mass_g = self.balance.read_weight()
 
-                g_per_rev = mass_g / (volume_per_step_ml / ml_per_rev)
                 density_g_per_cm3 = mass_g / volume_per_step_ml
                 results.append({
-                    "material_name": material_name,
-                    "pressure_mpa": pressure_mpa,
-                    "speed_ml_per_min": round(speed_ml_per_min, 4),
-                    "volume_per_step_ml": volume_per_step_ml,
+                    "speed_ml_per_min": speed_ml_per_min,
                     "mass_g": mass_g,
-                    "g_per_rev": g_per_rev,
                     "density_g_per_cm3": density_g_per_cm3,
                 })
-                speed_ml_per_min += speed_step_ml_per_min
 
-            self.data_client.submit_datapoint(
-                ValueDataPoint(label="calibration_results", value=results)
-            )
-
-            baseline_g_per_rev = results[0]["g_per_rev"]
-            # TODO: 安定範囲の閾値（現在10%）は実測値を確認後に見直す
-            stable_results = [
-                r for r in results
-                if r["g_per_rev"] >= baseline_g_per_rev * 0.90
-            ]
-            optimal = max(stable_results, key=lambda r: r["speed_ml_per_min"])
+            # スループット重視: 密度 × 速度（g/min）が最大の点
+            throughput = max(results, key=lambda r: r["density_g_per_cm3"] * r["speed_ml_per_min"])
+            # 精度重視: 最低速度の点
+            accuracy = min(results, key=lambda r: r["speed_ml_per_min"])
 
             return ActionSucceeded(json_result={
+                "material_name": material_name,
+                "pressure_mpa": pressure_mpa,
+                "device_name": "high_viscosity_dispenser",
+                "volume_per_step_ml": volume_per_step_ml,
                 "calibration_results": results,
-                "optimal": {
-                    "material_name": material_name,
-                    "pressure_mpa": pressure_mpa,
-                    "speed_ml_per_min": optimal["speed_ml_per_min"],
-                    "g_per_rev": optimal["g_per_rev"],
+                "throughput": {
+                    "speed_ml_per_min": throughput["speed_ml_per_min"],
+                    "density_g_per_cm3": throughput["density_g_per_cm3"],
                 },
+                "accuracy": {
+                    "speed_ml_per_min": accuracy["speed_ml_per_min"],
+                    "density_g_per_cm3": accuracy["density_g_per_cm3"],
+                },
+            })
+        except Exception as e:
+            return ActionFailed(errors=[e])
+
+    @action
+    def dispense(
+        self,
+        material_name: str,
+        target_mass_g: float,
+        pressure_mpa: float,
+    ) -> dict:
+        """Dispense a target mass of a high-viscosity liquid using a two-phase gravimetric strategy.
+
+        Phase 1 (Coarse): Repeatedly dispenses 90 % of the remaining mass at throughput speed
+        until the remaining mass falls within the precision threshold (MIN_VOLUME_ML × 10 × density).
+        Phase 2 (Precision): Dispenses the exact remaining mass at accuracy speed until within
+        tolerance (MIN_VOLUME_ML × density).
+
+        Dispensing parameters (speed, density) and suck-back parameters are read from the
+        Resource Manager (schema v1.2). Register them via material_management.ipynb and
+        dispenser_check.ipynb before running.
+        """
+        # --- [1] Fetch material parameters from Resource Manager ---
+        try:
+            material = self.resource_client.query_resource(resource_name=material_name)
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code == 404:
+                return ActionFailed(
+                    errors=[ValueError(f"Material '{material_name}' not found in Resource Manager")]
+                )
+            return ActionFailed(errors=[e])
+        except Exception as e:
+            return ActionFailed(errors=[e])
+
+        attrs = material.attributes or {}
+        device_params = attrs.get("dispensing_params", {}).get("high_viscosity_dispenser", {})
+
+        suck_back = device_params.get("suck_back", {})
+        suck_back_volume_ml = suck_back.get("volume_ml")
+        suck_back_delay_s = suck_back.get("delay_s")
+        if suck_back_volume_ml is None or suck_back_delay_s is None:
+            return ActionFailed(
+                errors=[ValueError(
+                    f"Material '{material_name}' has no dispensing_params.high_viscosity_dispenser.suck_back. "
+                    "Register suck-back parameters via material_management.ipynb before dispensing."
+                )]
+            )
+
+        pressure_key = f"{pressure_mpa}MPa"
+        pressure_params = device_params.get(pressure_key, {})
+        throughput = pressure_params.get("throughput", {})
+        throughput_speed = throughput.get("speed_ml_per_min")
+        throughput_density = throughput.get("density_g_per_cm3")
+        accuracy = pressure_params.get("accuracy", {})
+        accuracy_speed = accuracy.get("speed_ml_per_min")
+        accuracy_density = accuracy.get("density_g_per_cm3")
+
+        if throughput_speed is None or accuracy_speed is None:
+            return ActionFailed(
+                errors=[ValueError(
+                    f"Material '{material_name}' has no dispensing_params for '{pressure_key}'. "
+                    "Run calibrate_dispenser via dispenser_check.ipynb before dispensing."
+                )]
+            )
+
+        nominal_density = attrs.get("physical_properties_nominal", {}).get("density_g_per_cm3")
+        if throughput_density is None:
+            throughput_density = nominal_density
+        if throughput_density is None:
+            return ActionFailed(
+                errors=[ValueError(
+                    f"Material '{material_name}' has no throughput density or nominal density. "
+                    "Register physical_properties_nominal.density_g_per_cm3 via material_management.ipynb."
+                )]
+            )
+        if accuracy_density is None:
+            accuracy_density = throughput_density
+
+        # --- [2] Constants ---
+        MIN_VOLUME_ML: float = self.high_viscosity_dispenser.MIN_VOLUME_ML
+        THROUGHPUT_RATIO: float = 0.80
+        PRECISION_EXTRA_WAIT_S: float = 2.0
+        MAX_ITERATIONS: int = 20
+        tolerance_g: float = MIN_VOLUME_ML * accuracy_density
+
+        total_dispensed_volume_ml: float = 0.0
+        measured_mass_g: float = 0.0
+        remaining_mass_g: float = target_mass_g
+        throughput_iterations: int = 0
+        precision_iterations: int = 0
+
+        try:
+            # --- [3] Tare balance ---
+            t_start = time.monotonic()
+            self.balance.tare()
+
+            # --- [4] Throughput phase (95% of target, single shot with suck-back) ---
+            volume = target_mass_g * THROUGHPUT_RATIO / throughput_density
+            if volume < MIN_VOLUME_ML:
+                volume = MIN_VOLUME_ML
+            self.high_viscosity_dispenser.dispense(volume, throughput_speed)
+            self.high_viscosity_dispenser.suck_back(suck_back_volume_ml, delay_s=suck_back_delay_s)
+            total_dispensed_volume_ml += volume - suck_back_volume_ml
+            measured_mass_g = self.balance.read_weight()
+            remaining_mass_g = target_mass_g - measured_mass_g
+            throughput_iterations = 1
+
+            # --- [5] Precision phase ---
+            if remaining_mass_g > 0 and remaining_mass_g > tolerance_g:
+                # 1st precision shot: target remaining at accuracy speed, no suck-back
+                volume = remaining_mass_g / accuracy_density
+                if volume < MIN_VOLUME_ML:
+                    # Remaining is too small to dispense even MIN_VOLUME; done
+                    pass
+                else:
+                    self.high_viscosity_dispenser.dispense(volume, accuracy_speed)
+                    time.sleep(suck_back_delay_s + PRECISION_EXTRA_WAIT_S)
+                    total_dispensed_volume_ml += volume
+                    measured_mass_g = self.balance.read_weight()
+                    remaining_mass_g = target_mass_g - measured_mass_g
+                    precision_iterations += 1
+
+                    # 2nd+ precision shots: MIN_VOLUME each, no suck-back until done
+                    while remaining_mass_g > 0 and remaining_mass_g > tolerance_g:
+                        while self.node_status.paused:
+                            time.sleep(0.1)
+                        self.high_viscosity_dispenser.dispense(MIN_VOLUME_ML, accuracy_speed)
+                        time.sleep(suck_back_delay_s + PRECISION_EXTRA_WAIT_S)
+                        total_dispensed_volume_ml += MIN_VOLUME_ML
+                        measured_mass_g = self.balance.read_weight()
+                        remaining_mass_g = target_mass_g - measured_mass_g
+                        precision_iterations += 1
+                        if remaining_mass_g <= 0:
+                            break
+                        if precision_iterations >= MAX_ITERATIONS:
+                            return ActionFailed(
+                                errors=[ValueError(
+                                    f"Precision phase exceeded {MAX_ITERATIONS} iterations. "
+                                    f"target={target_mass_g} g, measured={measured_mass_g:.4f} g"
+                                )]
+                            )
+                    # Final suck-back after all 2nd+ precision shots complete
+                    self.high_viscosity_dispenser.suck_back(suck_back_volume_ml, delay_s=suck_back_delay_s)
+                    total_dispensed_volume_ml -= suck_back_volume_ml
+
+            # --- [6] Return results ---
+            density_g_per_cm3 = (
+                measured_mass_g / total_dispensed_volume_ml
+                if total_dispensed_volume_ml > 0
+                else None
+            )
+            elapsed_s = time.monotonic() - t_start
+            return ActionSucceeded(json_result={
+                "material_name": material_name,
+                "pressure_mpa": pressure_mpa,
+                "target_mass_g": target_mass_g,
+                "measured_mass_g": measured_mass_g,
+                "density_g_per_cm3": density_g_per_cm3,
+                "total_dispensed_volume_ml": total_dispensed_volume_ml,
+                "throughput_iterations": throughput_iterations,
+                "precision_iterations": precision_iterations,
+                "elapsed_s": round(elapsed_s, 2),
             })
         except Exception as e:
             return ActionFailed(errors=[e])
@@ -262,18 +433,16 @@ class HighViscosityLiquidWeighingNode(RestNode):
         dispense_speed_ml_per_min: float,
         suck_back_delay_s: float,
         suck_back_volume_ml: float,
-        suck_back_speed_ml_per_min: float,
-    ) -> ActionSucceeded:
+    ) -> dict:
         """Dispense then suck back once for manual suck-back parameter tuning.
 
         Intended for interactive use from a notebook. Run repeatedly with different
-        suck_back_delay_s / suck_back_volume_ml / suck_back_speed_ml_per_min values
-        while visually inspecting drip and stringing behaviour. Record the best
-        parameters in the Resource Manager once satisfied.
+        suck_back_delay_s / suck_back_volume_ml values while visually inspecting
+        drip and stringing behaviour. Record the best parameters in the Resource
+        Manager once satisfied. Suck-back speed is fixed at SUCK_BACK_SPEED_ML_PER_MIN.
 
         Constraints:
-            suck_back_volume_ml       : 0.004 mL <= value <= dispense_volume_ml
-            suck_back_speed_ml_per_min: 0.5 <= value <= 6.0
+            suck_back_volume_ml: 0.004 mL <= value <= dispense_volume_ml
         """
         try:
             self.resource_client.query_resource(resource_name=material_name)
@@ -293,7 +462,7 @@ class HighViscosityLiquidWeighingNode(RestNode):
 
         try:
             self.high_viscosity_dispenser.dispense(dispense_volume_ml, dispense_speed_ml_per_min)
-            self.high_viscosity_dispenser.suck_back(suck_back_volume_ml, suck_back_speed_ml_per_min, delay_s=suck_back_delay_s)
+            self.high_viscosity_dispenser.suck_back(suck_back_volume_ml, delay_s=suck_back_delay_s)
             return ActionSucceeded(json_result={
                 "material_name": material_name,
                 "pressure_mpa": pressure_mpa,
@@ -301,7 +470,6 @@ class HighViscosityLiquidWeighingNode(RestNode):
                 "dispense_speed_ml_per_min": dispense_speed_ml_per_min,
                 "suck_back_delay_s": suck_back_delay_s,
                 "suck_back_volume_ml": suck_back_volume_ml,
-                "suck_back_speed_ml_per_min": suck_back_speed_ml_per_min,
             })
         except Exception as e:
             return ActionFailed(errors=[e])

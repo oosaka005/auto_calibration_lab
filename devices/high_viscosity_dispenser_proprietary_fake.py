@@ -17,9 +17,10 @@ class HighViscosityDispenserProprietaryFake:
     MAX_SPEED_ML_PER_MIN: float = 6.0                                      # eco-PEN450 hardware limit: 6.0 mL/min
     MIN_SPEED_ML_PER_MIN: float = 0.5                                      # eco-PEN450 minimum stable speed
     MIN_VOLUME_ML: float = 0.004                                           # eco-PEN450 minimum meaningful movement volume
-    _ML_PER_REV: float = 0.05                                              # eco-PEN450 fixed displacement: 0.05 mL/rev
-    _MIN_ROTATIONS: float = MIN_VOLUME_ML / _ML_PER_REV                    # = 0.08 rev (internal use)
-    _MIN_SPEED_RPS: float = (MIN_SPEED_ML_PER_MIN / 60.0) / _ML_PER_REV   # ≈ 0.167 rps (internal use)
+    SUCK_BACK_SPEED_ML_PER_MIN: float = 2.0                                # fixed suck-back speed [mL/min]
+    ML_PER_REV: float = 0.05                                               # eco-PEN450 fixed displacement: 0.05 mL/rev
+    _MIN_ROTATIONS: float = MIN_VOLUME_ML / ML_PER_REV                    # = 0.08 rev (internal use)
+    _MIN_SPEED_RPS: float = (MIN_SPEED_ML_PER_MIN / 60.0) / ML_PER_REV   # ≈ 0.167 rps (internal use)
 
     def __init__(
         self,
@@ -59,27 +60,27 @@ class HighViscosityDispenserProprietaryFake:
 
     def dispense(self, volume_ml: float, speed_ml_per_min: float) -> None:
         """Simulate forward rotation to dispense `volume_ml` mL at `speed_ml_per_min` mL/min."""
-        rotations = volume_ml / self._ML_PER_REV
-        speed_rps = (speed_ml_per_min / 60.0) / self._ML_PER_REV
+        rotations = volume_ml / self.ML_PER_REV
+        speed_rps = (speed_ml_per_min / 60.0) / self.ML_PER_REV
         self._rotate(rotations, speed_rps, +1)
 
-    def suck_back(self, volume_ml: float, speed_ml_per_min: float, delay_s: float = 0.0) -> None:
-        """Simulate backward rotation to suck back `volume_ml` mL at `speed_ml_per_min` mL/min.
+    def suck_back(self, volume_ml: float, delay_s: float = 0.0) -> None:
+        """Simulate backward rotation to suck back `volume_ml` mL at the fixed SUCK_BACK_SPEED_ML_PER_MIN.
 
         Args:
             delay_s: Seconds to wait before starting backward rotation (simulated at full speed).
         """
         if delay_s > 0.0:
             time.sleep(delay_s * self._latency)
-        rotations = volume_ml / self._ML_PER_REV
-        speed_rps = (speed_ml_per_min / 60.0) / self._ML_PER_REV
+        rotations = volume_ml / self.ML_PER_REV
+        speed_rps = (self.SUCK_BACK_SPEED_ML_PER_MIN / 60.0) / self.ML_PER_REV
         self._rotate(rotations, speed_rps, -1)
 
     def purge(self, volume_ml: float) -> None:
         """Simulate purge rotation to dispense `volume_ml` mL at the fixed purge speed."""
         if self._purge_speed_rps is None:
             raise ValueError("purge_speed_rps is not set. Set it in devices.settings.yaml before calling purge().")
-        rotations = volume_ml / self._ML_PER_REV
+        rotations = volume_ml / self.ML_PER_REV
         self._rotate(rotations, self._purge_speed_rps, +1)
 
     def close(self) -> None:

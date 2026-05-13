@@ -180,13 +180,24 @@ Device field names in the Node (e.g. `self.balance`, `self.high_viscosity_dispen
 
 ```python
 @action
-def dispense_target_mass(self, target_g: float, speed_rps: float) -> ActionSucceeded:
+def dispense_target_mass(self, target_g: float, speed_rps: float) -> dict:
     ...
 
 @action(blocking=False)
-def get_status(self) -> ActionSucceeded:
+def get_status(self) -> dict:
     ...
 ```
+
+> **Return type annotation rule:**
+>
+> | 状況 | アノテーション | return |
+> |---|---|---|
+> | `json_result` に dict を返す（計測結果・評価値など） | `-> dict:` | `ActionSucceeded(json_result={...})` |
+> | `json_result` を返さない（動作させるだけ） | `-> ActionResult:` | `ActionSucceeded()` |
+>
+> **`-> ActionSucceeded:` または `-> ActionResult:` を `json_result` に dict を返すアクションに使ってはいけない。**  
+> MADSci の `_extract_json_result_type` がこのアノテーションを FastAPI `response_model` の `json_result` フィールドの型として使うため、  
+> dict を入れても `ActionSucceeded` に強制変換されてすべてのフィールドが失われ `json_result: null` になる。
 
 ### Return Values and Error Handling
 
@@ -203,12 +214,20 @@ Wrap the main logic in a `try` block. Device commands raise Python exceptions on
 
 ```python
 @action
-def dispense_target_mass(self, target_g: float, speed_rps: float) -> ActionSucceeded:
+def dispense_target_mass(self, target_g: float, speed_rps: float) -> dict:  # json_result あり
     try:
         self.dispenser.dispense(...)
         return ActionSucceeded(json_result={"mass_g": 1.23})
     except Exception as e:
         return ActionFailed(errors=[e])  # exception type, message, and timestamp are all recorded
+
+@action
+def move_to_position(self, position: str) -> ActionResult:  # json_result なし
+    try:
+        self.arm.move(position)
+        return ActionSucceeded()
+    except Exception as e:
+        return ActionFailed(errors=[e])
 ```
 
 - `json_result` in `ActionSucceeded` is used for `feed_forward` in the Workflow YAML, and is **automatically saved** to the Data Manager when run via a Workflow (see Data Saving below)
@@ -244,7 +263,7 @@ Inside actions, insert the pause check **between** device commands:
 
 ```python
 @action
-def dispense_batch(self, n: int) -> ActionSucceeded:
+def dispense_batch(self, n: int) -> ActionResult:
     for i in range(n):
         while self.node_status.paused:   # wait here until resumed
             time.sleep(0.1)
@@ -302,6 +321,20 @@ Ownership metadata is attached automatically to saved datapoints:
 - `ownership_info` — `experiment_id`, `campaign_id`, `workflow_id`, `step_id`, `node_id`, `workcell_id`, `user_id`, `manager_id`, `project_id`, `lab_id`
 
 Fields that the system cannot know must be stored inside `value` (e.g. `material_name`, `pressure_mpa`).
+
+> **Rule: include Data Manager search keys in `json_result`**
+>
+> When designing `json_result`, always include any field that will be needed to filter or identify
+> the datapoint later in the Data Manager. The system automatically records execution context
+> (timestamp, workflow/step/node IDs), but domain-specific identifiers are not captured automatically.
+>
+> Typical fields to include:
+> - `material_name` — which material was processed
+> - `pressure_mpa` — operating condition
+> - Any other parameter that distinguishes this run from others of the same action type
+>
+> Measurement results (masses, densities, iteration counts, etc.) are included alongside these keys
+> in the same flat dict — no need to separate "meta" from "results".
 
 ---
 

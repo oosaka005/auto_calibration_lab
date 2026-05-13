@@ -25,6 +25,11 @@ Serial command protocol is used (not native USB).
     - Command timeout: disabled  (required for dispensing longer than 1 s)
     - Baud rate: 9600            (must match baud_rate parameter)
     - Step mode: match microstep_multiplier  (T500 supports full / 1/2 / 1/4 / 1/8)
+
+--- Motor direction (verified on hardware, 2026-05-11) ---
+
+    direction = +1 : forward  → dispense (liquid is pushed out)
+    direction = -1 : reverse  → suck back (liquid is drawn back)
 """
 
 import logging
@@ -42,9 +47,10 @@ class HighViscosityDispenserProprietary:
     MAX_SPEED_ML_PER_MIN: float = 6.0                                      # eco-PEN450 hardware limit: 6.0 mL/min
     MIN_SPEED_ML_PER_MIN: float = 0.5                                      # eco-PEN450 minimum stable speed
     MIN_VOLUME_ML: float = 0.004                                           # eco-PEN450 minimum meaningful movement volume
-    _ML_PER_REV: float = 0.05                                              # eco-PEN450 fixed displacement: 0.05 mL/rev
-    _MIN_ROTATIONS: float = MIN_VOLUME_ML / _ML_PER_REV                    # = 0.08 rev (internal use)
-    _MIN_SPEED_RPS: float = (MIN_SPEED_ML_PER_MIN / 60.0) / _ML_PER_REV   # ≈ 0.167 rps (internal use)
+    SUCK_BACK_SPEED_ML_PER_MIN: float = 2.0                                # fixed suck-back speed [mL/min]
+    ML_PER_REV: float = 0.05                                               # eco-PEN450 fixed displacement: 0.05 mL/rev
+    _MIN_ROTATIONS: float = MIN_VOLUME_ML / ML_PER_REV                    # = 0.08 rev (internal use)
+    _MIN_SPEED_RPS: float = (MIN_SPEED_ML_PER_MIN / 60.0) / ML_PER_REV   # ≈ 0.167 rps (internal use)
 
     def __init__(
         self,
@@ -153,21 +159,21 @@ class HighViscosityDispenserProprietary:
 
     def dispense(self, volume_ml: float, speed_ml_per_min: float) -> None:
         """Rotate forward to dispense `volume_ml` mL at `speed_ml_per_min` mL/min."""
-        rotations = volume_ml / self._ML_PER_REV
-        speed_rps = (speed_ml_per_min / 60.0) / self._ML_PER_REV
+        rotations = volume_ml / self.ML_PER_REV
+        speed_rps = (speed_ml_per_min / 60.0) / self.ML_PER_REV
         with self._lock:
             self._rotate(rotations, speed_rps, +1)
 
-    def suck_back(self, volume_ml: float, speed_ml_per_min: float, delay_s: float = 0.0) -> None:
-        """Rotate backward to suck back `volume_ml` mL at `speed_ml_per_min` mL/min to prevent dripping.
+    def suck_back(self, volume_ml: float, delay_s: float = 0.0) -> None:
+        """Rotate backward to suck back `volume_ml` mL at the fixed SUCK_BACK_SPEED_ML_PER_MIN to prevent dripping.
 
         Args:
             delay_s: Seconds to wait after the preceding dispense before starting backward rotation.
         """
         if delay_s > 0.0:
             time.sleep(delay_s)
-        rotations = volume_ml / self._ML_PER_REV
-        speed_rps = (speed_ml_per_min / 60.0) / self._ML_PER_REV
+        rotations = volume_ml / self.ML_PER_REV
+        speed_rps = (self.SUCK_BACK_SPEED_ML_PER_MIN / 60.0) / self.ML_PER_REV
         with self._lock:
             self._rotate(rotations, speed_rps, -1)
 
@@ -175,7 +181,7 @@ class HighViscosityDispenserProprietary:
         """Rotate forward to purge `volume_ml` mL at the fixed purge speed to prime or clear the nozzle."""
         if self._purge_speed_rps is None:
             raise ValueError("purge_speed_rps is not set. Set it in devices.settings.yaml before calling purge().")
-        rotations = volume_ml / self._ML_PER_REV
+        rotations = volume_ml / self.ML_PER_REV
         with self._lock:
             self._rotate(rotations, self._purge_speed_rps, +1)
 
