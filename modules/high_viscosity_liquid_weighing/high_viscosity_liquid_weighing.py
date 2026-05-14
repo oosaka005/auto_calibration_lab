@@ -15,6 +15,7 @@ from typing import Annotated, Any, ClassVar, Optional
 
 import yaml
 from madsci.common.types.action_types import ActionFailed, ActionSucceeded
+from madsci.common.types.admin_command_types import AdminCommandResponse
 from madsci.common.types.node_types import RestNodeConfig
 from madsci.node_module.helpers import action
 from madsci.node_module.rest_node_module import RestNode
@@ -162,14 +163,61 @@ class HighViscosityLiquidWeighingNode(RestNode):
             }
 
     # -----------------------------------------------------------------------
-    # Actions
+    # Admin Commands
     #
-    # Note: pause / cancel support
-    #   The minimum interruptable unit is a single device command.
-    #   A running command always completes; interruption happens before the next one.
-    #   To support pause/cancel, call self._checkpoint() between device commands
-    #   inside the action loop. See liquidhandler.py for a reference implementation.
+    # MADSci auto-registers any method whose name matches an AdminCommands enum value.
+    # Add all candidate commands here. Implement the body when needed; comment out
+    # the entire method (including @decorator) when the command is not applicable to
+    # this node.
+    #
+    # Provided by framework (do NOT re-implement here):
+    #   lock / unlock  — prevents new actions from being accepted
+    #   reset          — clears errored / stopped state
+    #   shutdown       — stops the node process
     # -----------------------------------------------------------------------
+
+    def pause(self) -> AdminCommandResponse:
+        """Pause before the next device command."""
+        self.node_status.paused = True
+        return AdminCommandResponse()
+
+    def resume(self) -> AdminCommandResponse:
+        """Resume a paused node."""
+        self.node_status.paused = False
+        return AdminCommandResponse()
+
+    # def cancel(self) -> AdminCommandResponse:
+    #     """Cancel the currently running action.
+    #     To implement: add a self._cancelled flag (node_status has no cancel flag),
+    #     set it here, and raise CancelledError in _checkpoint().
+    #     """
+    #     # self._cancelled = True
+    #     return AdminCommandResponse()
+
+    # def safety_stop(self) -> AdminCommandResponse:
+    #     """Emergency stop. Implement when physical safety devices (e-stop button etc.) are connected."""
+    #     # self.dispenser.halt()
+    #     # self.node_status.stopped = True
+    #     return AdminCommandResponse()
+
+    # def get_location(self) -> AdminCommandResponse:
+    #     """Return physical coordinates of this node. Mainly used for robot arm nodes."""
+    #     # return AdminCommandResponse(data=[x, y, z, rotation])
+    #     return AdminCommandResponse()
+
+
+    def _checkpoint(self) -> None:
+        """Check node status flags between device commands.
+
+        paused → block here until resume() clears the flag.
+        """
+        while self.node_status.paused:
+            time.sleep(0.1)
+
+    # -----------------------------------------------------------------------
+    # Actions
+    # -----------------------------------------------------------------------
+
 
     @action
     def calibrate_dispenser(
@@ -222,8 +270,7 @@ class HighViscosityLiquidWeighingNode(RestNode):
             for i in range(n_steps):
                 speed_ml_per_min = round(speed_start_ml_per_min + i * speed_step_ml_per_min, 4)
 
-                while self.node_status.paused:
-                    time.sleep(0.1)
+                self._checkpoint()
 
                 self.balance.tare()
 
@@ -239,9 +286,9 @@ class HighViscosityLiquidWeighingNode(RestNode):
                     "density_g_per_cm3": density_g_per_cm3,
                 })
 
-            # スループット重視: 密度 × 速度（g/min）が最大の点
+            # Throughput: point with maximum density × speed (g/min)
             throughput = max(results, key=lambda r: r["density_g_per_cm3"] * r["speed_ml_per_min"])
-            # 精度重視: 最低速度の点
+            # Accuracy: lowest speed point (closest to true value)
             accuracy = min(results, key=lambda r: r["speed_ml_per_min"])
 
             return ActionSucceeded(json_result={
@@ -271,13 +318,16 @@ class HighViscosityLiquidWeighingNode(RestNode):
     ) -> dict:
         """Dispense a target mass of a high-viscosity liquid using a two-phase gravimetric strategy.
 
-        Phase 1 (Coarse): Repeatedly dispenses 90 % of the remaining mass at throughput speed
-        until the remaining mass falls within the precision threshold (MIN_VOLUME_ML × 10 × density).
-        Phase 2 (Precision): Dispenses the exact remaining mass at accuracy speed until within
-        tolerance (MIN_VOLUME_ML × density).
+        Phase 1 (Throughput): Repeatedly dispenses 80% of the remaining mass at throughput speed
+        with suck-back, until remaining mass falls within min_shot_g × 10.
+        Skipped entirely if the initial remaining mass is already ≤ min_shot_g × 10.
 
-        Dispensing parameters (speed, density) and suck-back parameters are read from the
-        Resource Manager (schema v1.2). Register them via material_management.ipynb and
+        Phase 2 (Precision): Repeatedly dispenses 90% of the remaining mass at accuracy speed,
+        waits min_shot.wait_s, reads the balance, and repeats until remaining mass ≤ min_shot_g.
+        No suck-back is performed during the precision phase.
+
+        min_shot, dispensing parameters (speed, density), and suck-back parameters are read from
+        the Resource Manager (schema v1.3). Register them via material_management.ipynb and
         dispenser_check.ipynb before running.
         """
         # --- [1] Fetch material parameters from Resource Manager ---
@@ -336,12 +386,25 @@ class HighViscosityLiquidWeighingNode(RestNode):
         if accuracy_density is None:
             accuracy_density = throughput_density
 
+        min_shot = pressure_params.get("min_shot", {})
+        min_shot_volume_ml = min_shot.get("commanded_volume_ml")
+        min_shot_wait_s = min_shot.get("wait_s")
+        min_shot_mass_mg = min_shot.get("measured_mass_mg")
+        if min_shot_volume_ml is None or min_shot_wait_s is None or min_shot_mass_mg is None:
+            return ActionFailed(
+                errors=[ValueError(
+                    f"Material '{material_name}' has no min_shot data for '{pressure_key}'. "
+                    "Measure min_shot manually via dispenser_check.ipynb before dispensing."
+                )]
+            )
+        min_shot_g: float = min_shot_mass_mg / 1000.0
+
         # --- [2] Constants ---
-        MIN_VOLUME_ML: float = self.high_viscosity_dispenser.MIN_VOLUME_ML
         THROUGHPUT_RATIO: float = 0.80
-        PRECISION_EXTRA_WAIT_S: float = 2.0
-        MAX_ITERATIONS: int = 20
-        tolerance_g: float = MIN_VOLUME_ML * accuracy_density
+        PRECISION_RATIO: float = 1.00
+        MAX_ITERATIONS: int = 10
+        throughput_threshold_g: float = min_shot_g * 10.0
+        precision_threshold_g: float = min_shot_g / 2.0
 
         total_dispensed_volume_ml: float = 0.0
         measured_mass_g: float = 0.0
@@ -354,54 +417,70 @@ class HighViscosityLiquidWeighingNode(RestNode):
             t_start = time.monotonic()
             self.balance.tare()
 
-            # --- [4] Throughput phase (95% of target, single shot with suck-back) ---
-            volume = target_mass_g * THROUGHPUT_RATIO / throughput_density
-            if volume < MIN_VOLUME_ML:
-                volume = MIN_VOLUME_ML
-            self.high_viscosity_dispenser.dispense(volume, throughput_speed)
-            self.high_viscosity_dispenser.suck_back(suck_back_volume_ml, delay_s=suck_back_delay_s)
-            total_dispensed_volume_ml += volume - suck_back_volume_ml
-            measured_mass_g = self.balance.read_weight()
-            remaining_mass_g = target_mass_g - measured_mass_g
-            throughput_iterations = 1
+            # --- [3b] Sub-min-shot: target ≤ min_shot_g/2 → single min_shot only ---
+            if target_mass_g <= precision_threshold_g:
+                self.high_viscosity_dispenser.dispense(min_shot_volume_ml, accuracy_speed)
+                time.sleep(min_shot_wait_s)
+                total_dispensed_volume_ml = min_shot_volume_ml
+                measured_mass_g = self.balance.read_weight()
+                elapsed_s = time.monotonic() - t_start
+                return ActionSucceeded(json_result={
+                    "material_name": material_name,
+                    "pressure_mpa": pressure_mpa,
+                    "target_mass_g": target_mass_g,
+                    "measured_mass_g": measured_mass_g,
+                    "density_g_per_cm3": (
+                        measured_mass_g / total_dispensed_volume_ml
+                        if total_dispensed_volume_ml > 0 else None
+                    ),
+                    "total_dispensed_volume_ml": total_dispensed_volume_ml,
+                    "throughput_iterations": 0,
+                    "precision_iterations": 0,
+                    "elapsed_s": round(elapsed_s, 2),
+                })
+
+            # --- [4] Throughput phase ---
+            # Repeat until remaining ≤ min_shot_g × 10. Skip entirely if already below threshold.
+            while remaining_mass_g > throughput_threshold_g:
+                self._checkpoint()
+                volume = remaining_mass_g * THROUGHPUT_RATIO / throughput_density
+                self.high_viscosity_dispenser.dispense(volume, throughput_speed)
+                self.high_viscosity_dispenser.suck_back(suck_back_volume_ml, delay_s=suck_back_delay_s)
+                total_dispensed_volume_ml += volume - suck_back_volume_ml
+                measured_mass_g = self.balance.read_weight()
+                remaining_mass_g = target_mass_g - measured_mass_g
+                throughput_iterations += 1
+                if throughput_iterations >= MAX_ITERATIONS:
+                    return ActionFailed(
+                        errors=[ValueError(
+                            f"Throughput phase exceeded {MAX_ITERATIONS} iterations. "
+                            f"target={target_mass_g} g, measured={measured_mass_g:.4f} g"
+                        )]
+                    )
 
             # --- [5] Precision phase ---
-            if remaining_mass_g > 0 and remaining_mass_g > tolerance_g:
-                # 1st precision shot: target remaining at accuracy speed, no suck-back
-                volume = remaining_mass_g / accuracy_density
-                if volume < MIN_VOLUME_ML:
-                    # Remaining is too small to dispense even MIN_VOLUME; done
-                    pass
+            # Repeat until remaining ≤ min_shot_g/2.
+            # If remaining < min_shot_g, use min_shot_volume_ml (device minimum) instead of
+            # calculated volume, which would be below the physical dispensing minimum.
+            while remaining_mass_g > precision_threshold_g:
+                self._checkpoint()
+                if remaining_mass_g < min_shot_g:
+                    volume = min_shot_volume_ml
                 else:
-                    self.high_viscosity_dispenser.dispense(volume, accuracy_speed)
-                    time.sleep(suck_back_delay_s + PRECISION_EXTRA_WAIT_S)
-                    total_dispensed_volume_ml += volume
-                    measured_mass_g = self.balance.read_weight()
-                    remaining_mass_g = target_mass_g - measured_mass_g
-                    precision_iterations += 1
-
-                    # 2nd+ precision shots: MIN_VOLUME each, no suck-back until done
-                    while remaining_mass_g > 0 and remaining_mass_g > tolerance_g:
-                        while self.node_status.paused:
-                            time.sleep(0.1)
-                        self.high_viscosity_dispenser.dispense(MIN_VOLUME_ML, accuracy_speed)
-                        time.sleep(suck_back_delay_s + PRECISION_EXTRA_WAIT_S)
-                        total_dispensed_volume_ml += MIN_VOLUME_ML
-                        measured_mass_g = self.balance.read_weight()
-                        remaining_mass_g = target_mass_g - measured_mass_g
-                        precision_iterations += 1
-                        if remaining_mass_g <= 0:
-                            break
-                        if precision_iterations >= MAX_ITERATIONS:
-                            return ActionFailed(
-                                errors=[ValueError(
-                                    f"Precision phase exceeded {MAX_ITERATIONS} iterations. "
-                                    f"target={target_mass_g} g, measured={measured_mass_g:.4f} g"
-                                )]
-                            )
-                    # Final suck-back after all 2nd+ precision shots complete
-                    self.high_viscosity_dispenser.suck_back(suck_back_volume_ml, delay_s=suck_back_delay_s)
-                    total_dispensed_volume_ml -= suck_back_volume_ml
+                    volume = remaining_mass_g * PRECISION_RATIO / accuracy_density
+                self.high_viscosity_dispenser.dispense(volume, accuracy_speed)
+                time.sleep(min_shot_wait_s)
+                total_dispensed_volume_ml += volume
+                measured_mass_g = self.balance.read_weight()
+                remaining_mass_g = target_mass_g - measured_mass_g
+                precision_iterations += 1
+                if precision_iterations >= MAX_ITERATIONS:
+                    return ActionFailed(
+                        errors=[ValueError(
+                            f"Precision phase exceeded {MAX_ITERATIONS} iterations. "
+                            f"target={target_mass_g} g, measured={measured_mass_g:.4f} g"
+                        )]
+                    )
 
             # --- [6] Return results ---
             density_g_per_cm3 = (

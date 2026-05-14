@@ -48,6 +48,7 @@ Each Node directory must contain a `node.settings.yaml` file with the following 
 ```yaml
 node_name: high_viscosity_liquid_weighing   # unique name used by the Workcell and Location Manager
 node_type: device                           # always "device" for physical hardware nodes
+node_description: "One-line description of what this node does."  # required
 
 devices:           # list of device section names from devices/devices.settings.yaml
   - balance        # only listed devices are loaded by this node
@@ -57,6 +58,8 @@ interface_type: fake   # "fake" (simulated) or "real" (hardware). Default: "real
 ```
 
 - `node_name` must match the key used in `settings.yaml` under `workcell_nodes:`
+- `node_description` is recommended for documentation purposes. Write a single sentence describing the physical role of the node.
+  **Note:** MADSci 0.7.0 does not read `node_description` from `NodeConfig` / `node.settings.yaml` — `NodeConfig` lacks this field and `NodeInfo.from_config()` does not populate it. The value is silently ignored at runtime. Write it anyway as in-file documentation; it may be supported in a future MADSci version.
 - For `devices:` and `interface_type` rules, see `device_settings.instructions.md`
 
 ---
@@ -190,14 +193,14 @@ def get_status(self) -> dict:
 
 > **Return type annotation rule:**
 >
-> | 状況 | アノテーション | return |
+> | Situation | Annotation | return |
 > |---|---|---|
-> | `json_result` に dict を返す（計測結果・評価値など） | `-> dict:` | `ActionSucceeded(json_result={...})` |
-> | `json_result` を返さない（動作させるだけ） | `-> ActionResult:` | `ActionSucceeded()` |
+> | Returns a dict in `json_result` (measurements, evaluated values, etc.) | `-> dict:` | `ActionSucceeded(json_result={...})` |
+> | Returns nothing in `json_result` (action only, no result data) | `-> ActionResult:` | `ActionSucceeded()` |
 >
-> **`-> ActionSucceeded:` または `-> ActionResult:` を `json_result` に dict を返すアクションに使ってはいけない。**  
-> MADSci の `_extract_json_result_type` がこのアノテーションを FastAPI `response_model` の `json_result` フィールドの型として使うため、  
-> dict を入れても `ActionSucceeded` に強制変換されてすべてのフィールドが失われ `json_result: null` になる。
+> **Do NOT use `-> ActionSucceeded:` or `-> ActionResult:` for actions that return a dict in `json_result`.**
+> MADSci's `_extract_json_result_type` uses this annotation as the FastAPI `response_model` type for the `json_result` field.
+> If a dict is passed, it gets coerced to `ActionSucceeded` and all fields are lost, resulting in `json_result: null`.
 
 ### Return Values and Error Handling
 
@@ -214,7 +217,7 @@ Wrap the main logic in a `try` block. Device commands raise Python exceptions on
 
 ```python
 @action
-def dispense_target_mass(self, target_g: float, speed_rps: float) -> dict:  # json_result あり
+def dispense_target_mass(self, target_g: float, speed_rps: float) -> dict:  # has json_result
     try:
         self.dispenser.dispense(...)
         return ActionSucceeded(json_result={"mass_g": 1.23})
@@ -222,7 +225,7 @@ def dispense_target_mass(self, target_g: float, speed_rps: float) -> dict:  # js
         return ActionFailed(errors=[e])  # exception type, message, and timestamp are all recorded
 
 @action
-def move_to_position(self, position: str) -> ActionResult:  # json_result なし
+def move_to_position(self, position: str) -> ActionResult:  # no json_result
     try:
         self.arm.move(position)
         return ActionSucceeded()
@@ -246,46 +249,76 @@ Admin commands are sent via `POST /admin/{command}`. Some are implemented by the
 - `errored` and `stopped` both block new actions until `reset` is called
 
 
-### Pause support
+### Admin Commands
 
-**Design principle:** Most device commands in this project are synchronous and block until the operation completes. Some commands (e.g. `start_rotation`) return immediately and rely on a paired command (e.g. `stop_rotation`) to terminate the operation. In both cases, the Action wrapping the command completes normally and returns `ActionSucceeded`.
+MADSci auto-registers any method whose name matches an `AdminCommands` enum value.
+Include all candidate commands in every node file. Implement the body when needed; comment out the entire method when the command is not applicable.
+
+The following are **provided by the framework** — do NOT re-implement:
+`lock` / `unlock` / `reset` / `shutdown`
+
+Template for every node:
 
 ```python
-# Node class — implement these methods
-def pause(self) -> None:
-    self.node_status.paused = True
+from madsci.common.types.admin_command_types import AdminCommandResponse
 
-def resume(self) -> None:
+def pause(self) -> AdminCommandResponse:
+    """Pause before the next device command."""
+    self.node_status.paused = True
+    return AdminCommandResponse()
+
+def resume(self) -> AdminCommandResponse:
+    """Resume a paused node."""
     self.node_status.paused = False
+    return AdminCommandResponse()
+
+# def cancel(self) -> AdminCommandResponse:
+#     """Cancel the running action.
+#     To implement: add self._cancelled (node_status has no cancel flag),
+#     set it here, and check it in _checkpoint().
+#     """
+#     # self._cancelled = True
+#     return AdminCommandResponse()
+
+# def safety_stop(self) -> AdminCommandResponse:
+#     """Emergency stop. Implement when physical safety devices are connected."""
+#     # self.device.halt()
+#     # self.node_status.stopped = True
+#     return AdminCommandResponse()
+
+# def get_location(self) -> AdminCommandResponse:
+#     """Return physical coordinates. Mainly used for robot arm nodes."""
+#     # return AdminCommandResponse(data=[x, y, z, rotation])
+#     return AdminCommandResponse()
 ```
 
-Inside actions, insert the pause check **between** device commands:
+### `_checkpoint()` — Centralizing Flag Checks
+
+Admin commands only change flags. Actions check flags at `_checkpoint()`.
+Insert calls **between** device commands (any running command always completes first).
 
 ```python
+def _checkpoint(self) -> None:
+    """Check node status flags between device commands."""
+    while self.node_status.paused:   # paused → block until resume()
+        time.sleep(0.1)
+    # To implement cancel, add here:
+    # if self._cancelled:
+    #     self._cancelled = False
+    #     raise CancelledError()
+    # To implement safety_stop, add here:
+    # if self.node_status.stopped:
+    #     raise RuntimeError("Emergency stopped")
+
 @action
 def dispense_batch(self, n: int) -> ActionResult:
     for i in range(n):
-        while self.node_status.paused:   # wait here until resumed
-            time.sleep(0.1)
+        self._checkpoint()           # ← check pause / cancel / stopped in one place
         self.dispenser.dispense(...)
     return ActionSucceeded()
 ```
 
-> If a device command needs to be interrupted *during* execution (e.g., collision detection during a multi-second robot arm move), that logic belongs **inside the device command itself** — not in `pause()`. The device command should poll sensors internally and raise an exception if a threshold is exceeded.
-
-### `safety_stop` (optional)
-
-Implement only if the system has physical safety devices (e.g., emergency stop button):
-
-```python
-def safety_stop(self) -> None:
-    # Stop all actuators immediately
-    if self.dispenser is not None:
-        self.dispenser._halt_and_hold()
-    self.node_status.stopped = True
-```
-
-If implemented, also check `self.node_status.stopped` in action loops the same way as `paused`.
+> `_checkpoint()` is not framework-provided — it is a node-side convention. Implement only the flag checks you need.
 
 ---
 

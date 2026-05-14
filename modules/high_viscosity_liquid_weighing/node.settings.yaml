@@ -4,6 +4,7 @@
 
 node_name: high_viscosity_liquid_weighing
 node_type: device
+node_description: "Gravimetric dispensing node for high-viscosity liquids. Combines a Pololu Tic T500 stepper motor (syringe) with a serial analytical balance."
 
 devices:
   - balance

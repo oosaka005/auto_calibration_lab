@@ -115,6 +115,7 @@ The following infrastructure services are required. They do NOT use the shared a
 | `lab_manager` | `python -m madsci.squid.lab_server` |
 | `event_manager` | `python -m madsci.event_manager.event_server` |
 | `experiment_manager` | `python -m madsci.experiment_manager.experiment_server` |
+<!-- Note: do NOT add --server-url CLI arg here; settings.yaml takes precedence over CLI args (see Reference section) -->
 | `resource_manager` | `python -m madsci.resource_manager.resource_server` |
 | `data_manager` | `python -m madsci.data_manager.data_server` |
 | `workcell_manager` | `python -m madsci.workcell_manager.workcell_server` |
@@ -174,11 +175,34 @@ Each manager service must declare its own `SERVER_URL` and the URLs of services 
 
 | Manager | Required environment variables |
 |---------|--------------------------------|
+| `lab_manager` | `LAB_SERVER_URL=http://0.0.0.0:8000/` |
 | `event_manager` | `EVENT_SERVER_URL=http://0.0.0.0:8001/`, `EVENT_MONGO_DB_URL=mongodb://madsci_mongodb:27017/` |
 | `resource_manager` | `RESOURCE_SERVER_URL=http://0.0.0.0:8003/`, `RESOURCE_DB_URL=postgresql://madsci:madsci@madsci_postgres:5432/madsci_resources`, `EVENT_SERVER_URL=http://event_manager:8001/` |
 | `data_manager` | `DATA_SERVER_URL=http://0.0.0.0:8004/`, `DATA_MONGO_DB_URL=mongodb://madsci_mongodb:27017/`, `EVENT_SERVER_URL=http://event_manager:8001/` |
-| `workcell_manager` | `WORKCELL_SERVER_URL=http://0.0.0.0:8005/`, `WORKCELL_MONGO_DB_URL=mongodb://madsci_mongodb:27017/`, `WORKCELL_REDIS_HOST=madsci_redis`, `EVENT_SERVER_URL=http://event_manager:8001/`, `RESOURCE_SERVER_URL=http://resource_manager:8003/`, `LOCATION_SERVER_URL=http://location_manager:8006/` |
+| `workcell_manager` | `WORKCELL_SERVER_URL=http://0.0.0.0:8005/`, `WORKCELL_MONGO_DB_URL=mongodb://madsci_mongodb:27017/`, `WORKCELL_REDIS_HOST=madsci_redis`, `EVENT_SERVER_URL=http://event_manager:8001/`, `RESOURCE_SERVER_URL=http://resource_manager:8003/`, `LOCATION_SERVER_URL=http://location_manager:8006/`, `WORKCELL_NODES=<see below>` |
 | `location_manager` | `LOCATION_SERVER_URL=http://0.0.0.0:8006/`, `LOCATION_REDIS_HOST=madsci_redis`, `EVENT_SERVER_URL=http://event_manager:8001/`, `RESOURCE_SERVER_URL=http://resource_manager:8003/` |
+
+> **Infrastructure services** (`madsci_mongodb`, `madsci_redis`, `madsci_postgres`) do not use
+
+### WORKCELL_NODES — Required for workcell_manager to reach nodes
+
+`settings.yaml` defines `workcell_nodes` with `http://localhost:<port>/` URLs (Windows-side).
+However, `workcell_manager` runs inside a Docker container, so `localhost` resolves to the container itself — not the node containers. **This causes nodes to appear as "disconnected" in the dashboard.**
+
+**Fix:** Override node URLs with Docker-internal service names via `WORKCELL_NODES`:
+
+```yaml
+workcell_manager:
+  environment:
+    - WORKCELL_NODES={"<node_service_name>":"http://<node_service_name>:<port>/", "<node2>":"http://<node2>:<port>/"}
+```
+
+Rules:
+- Key must exactly match the node service name in compose.yaml (same as `NODE_NAME` env var)
+- Value must use the Docker service name as the hostname (same as `container_name`)
+- This env var overrides `workcell_nodes` in `settings.yaml` for container-internal access
+- `settings.yaml` `workcell_nodes` entries remain `http://localhost:<port>/` for notebooks/browser access
+- **Update `WORKCELL_NODES` every time a new node is added**
 
 > **Infrastructure services** (`madsci_mongodb`, `madsci_redis`, `madsci_postgres`) do not use
 > the `*madsci-service` anchor, but must still be added to `madsci_net` explicitly:
@@ -186,3 +210,17 @@ Each manager service must declare its own `SERVER_URL` and the URLs of services 
 > networks:
 >   - madsci_net
 > ```
+
+---
+
+## Reference: lab_manager URL Configuration
+
+### Why `LAB_SERVER_URL` uses `0.0.0.0`
+
+`LAB_SERVER_URL=http://0.0.0.0:8000/` binds uvicorn to all network interfaces. Using `localhost` would make the server unreachable from outside the container.
+
+**Setting priority (highest to lowest):** environment variables (`environment:`) → CLI args (`--xxx` in `command:`) → settings.yaml  
+`settings.yaml` has `lab_server_url: http://localhost:8000/`, but the `LAB_SERVER_URL` environment variable overrides it. This priority applies to all managers.
+
+**Why Lab Health shows Unhealthy:**  
+The Lab Health panel performs health checks by sending HTTP requests **from inside the lab_manager container** to each manager. `localhost:PORT` addresses are not reachable from inside a container (they resolve to the container itself, not other containers). This is a **display-only issue** and does not affect actual automation (workflow execution, resource management, etc.). All managers are accessible normally from the browser.

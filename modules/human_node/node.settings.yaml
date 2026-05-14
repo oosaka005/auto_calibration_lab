@@ -1,0 +1,6 @@
+# Node-specific settings for human_node
+# See .github/instructions/node.instructions.md for field descriptions.
+
+node_name: human_node
+node_type: device
+node_description: "Human-in-the-loop node for operator review and approval of calibration results."

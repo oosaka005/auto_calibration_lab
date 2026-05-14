@@ -70,9 +70,9 @@ services:
     <<: *madsci-service
     container_name: lab_manager
     image: ghcr.io/ad-sdl/madsci_dashboard:latest
-    command: python -m madsci.squid.lab_server --server-url http://0.0.0.0:8000/
+    command: python -m madsci.squid.lab_server
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health", "||", "exit", "1"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 3s
       retries: 3
@@ -82,7 +82,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - EVENT_SERVER_URL=http://event_manager:8001/
+      - LAB_SERVER_URL=http://0.0.0.0:8000/
 
   event_manager:
     <<: *madsci-service
@@ -99,13 +99,14 @@ services:
   experiment_manager:
     <<: *madsci-service
     container_name: experiment_manager
-    command: python -m madsci.experiment_manager.experiment_server --server-url http://0.0.0.0:8002/
+    command: python -m madsci.experiment_manager.experiment_server
     depends_on:
       - madsci_mongodb
       - lab_manager
     ports:
       - "8002:8002"
     environment:
+      - EXPERIMENT_SERVER_URL=http://0.0.0.0:8002/
       - EXPERIMENT_MONGO_DB_URL=mongodb://madsci_mongodb:27017/
       - EVENT_SERVER_URL=http://event_manager:8001/
 
@@ -156,6 +157,9 @@ services:
       - EVENT_SERVER_URL=http://event_manager:8001/
       - RESOURCE_SERVER_URL=http://resource_manager:8003/
       - LOCATION_SERVER_URL=http://location_manager:8006/
+      # Override workcell_nodes from settings.yaml with Docker-internal service names
+      # NOTE: Update this list every time a new node service is added.
+      - WORKCELL_NODES={"high_viscosity_liquid_weighing_1":"http://high_viscosity_liquid_weighing_1:2000/","human_node_1":"http://human_node_1:2001/"}
 
   location_manager:
     <<: *madsci-service
@@ -191,6 +195,22 @@ services:
       - EVENT_SERVER_URL=http://event_manager:8001/
       - RESOURCE_SERVER_URL=http://resource_manager:8003/
       - DATA_SERVER_URL=http://data_manager:8004/
+
+  human_node_1:
+    <<: *madsci-service
+    container_name: human_node_1
+    command: python modules/human_node/human_node.py
+    depends_on:
+      - event_manager
+    ports:
+      - "2001:2001"
+    environment:
+      - PYTHONPATH=/home/madsci/auto_calibration_lab
+      - NODE_NAME=human_node_1
+      - NODE_MODULE_NAME=human_node
+      - NODE_URL=http://0.0.0.0:2001/
+      - EVENT_SERVER_URL=http://event_manager:8001/
+      - RESOURCE_SERVER_URL=http://resource_manager:8003/
 
 networks:
   madsci_net:

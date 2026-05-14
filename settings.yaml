@@ -41,6 +41,7 @@ workcell_mongo_db_url: mongodb://localhost:27017/
 # Nodes in this workcell (add entries as new nodes are added)
 workcell_nodes:
   high_viscosity_liquid_weighing_1: http://localhost:2000/
+  human_node_1: http://localhost:2001/
 
 # Location Manager
 location_server_url: http://localhost:8006/
