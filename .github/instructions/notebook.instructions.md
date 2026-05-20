@@ -127,3 +127,50 @@ def import_device(filename: str):
     spec.loader.exec_module(mod)
     return mod
 ```
+
+---
+
+## ExperimentNotebook（参考）
+
+> **注意：以下は動作確認未済の情報です。**
+
+`ExperimentNotebook` は `ExperimentScript` と同じ実験ライフサイクル管理（Experiment Manager への記録）を持ちつつ、ノートブックのセル単位で実行できるモダリティ。
+
+**通常のノートブック（`notebooks/` 以下の現在の使い方）との違い：**
+
+| | 通常のノートブック | ExperimentNotebook |
+|---|---|---|
+| Experiment Manager への記録 | なし | 自動記録 |
+| 用途 | デバイス確認・材料管理等の作業 | 本番実験をセル単位で実施したい場合 |
+
+**使用が向いている場面の例：**
+- Human-in-the-loop で前のステップの結果をノートブック上で確認してから次のステップに進みたい場合
+- 実験データとして記録を残しながら、対話的にステップを実行したい場合
+
+**基本パターン：**
+
+```python
+# Cell 1: セットアップ
+from madsci.common.types.experiment_types import ExperimentDesign
+from madsci.experiment_application.experiment_notebook import ExperimentNotebook
+
+class MyExperiment(ExperimentNotebook):
+    experiment_design = ExperimentDesign(
+        experiment_name="My Interactive Experiment"
+    )
+
+exp = MyExperiment()
+
+# Cell 2: 実験開始（Experiment Manager に記録される）
+exp.start()
+
+# Cell 3: ステップ実行 → セル出力で結果確認
+result = exp.run_workflow("step1.workflow.yaml")
+exp.display(result)
+
+# Cell 4: 確認後、次のステップを実行
+result2 = exp.run_workflow("step2.workflow.yaml")
+
+# Cell N: 実験終了
+exp.end()
+```

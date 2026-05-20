@@ -4,3 +4,4 @@
 
 pyserial>=3.5
 sila2>=0.10.0
+matplotlib>=3.7.0

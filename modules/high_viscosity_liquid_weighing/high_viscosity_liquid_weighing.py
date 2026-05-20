@@ -553,6 +553,53 @@ class HighViscosityLiquidWeighingNode(RestNode):
         except Exception as e:
             return ActionFailed(errors=[e])
 
+    @action
+    def dispense_batch(
+        self,
+        calibration_result: dict,
+        target_masses_g: list,
+    ) -> dict:
+        """Dispense each target mass in target_masses_g and collect results.
+
+        material_name and pressure_mpa are taken from calibration_result
+        (the json_result of calibrate_dispenser), so they can be passed via
+        feed_forward from that step without repeating them as workflow parameters.
+
+        Returns a list of per-point results under the key "dispense_results",
+        suitable for feed_forward into generate_dispense_plot.
+        """
+        material_name = calibration_result.get("material_name")
+        pressure_mpa = calibration_result.get("pressure_mpa")
+        if not material_name or pressure_mpa is None:
+            return ActionFailed(errors=[ValueError(
+                "calibration_result must contain 'material_name' and 'pressure_mpa'."
+            )])
+
+        dispense_results = []
+        for target_mass_g in target_masses_g:
+            self._checkpoint()
+            t_start = time.monotonic()
+            result = self.dispense(material_name=material_name,
+                                   target_mass_g=float(target_mass_g),
+                                   pressure_mpa=pressure_mpa)
+            elapsed_s = round(time.monotonic() - t_start, 2)
+            if hasattr(result, "errors") and result.errors:
+                return ActionFailed(errors=result.errors)
+            jr = result.json_result or {}
+            dispense_results.append({
+                "material_name": material_name,
+                "pressure_mpa": pressure_mpa,
+                "target_mass_g": float(target_mass_g),
+                "measured_mass_g": jr.get("measured_mass_g"),
+                "elapsed_s": elapsed_s,
+            })
+
+        return ActionSucceeded(json_result={
+            "material_name": material_name,
+            "pressure_mpa": pressure_mpa,
+            "dispense_results": dispense_results,
+        })
+
 
 if __name__ == "__main__":
     node = HighViscosityLiquidWeighingNode()

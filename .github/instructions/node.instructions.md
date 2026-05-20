@@ -322,6 +322,100 @@ def dispense_batch(self, n: int) -> ActionResult:
 
 ---
 
+## Human Node (Deviceless Node)
+
+To implement human-in-the-loop steps, create a Node with **no device connections**.
+Place operator-facing Actions (result review, approval gates, plot generation, etc.) in this Node.
+
+### When to use a Human Node
+
+- Operator must visually inspect a result before the workflow proceeds
+- A pause / resume gate is needed between automated steps
+- A plot or report must be generated and shown to the operator mid-workflow
+
+### Simplifications vs. a device Node
+
+Because `DEVICE_CLASSES = {}`, the following can be omitted or simplified:
+
+| Item | Normal Node | Deviceless Node |
+|---|---|---|
+| `DEVICE_CLASSES` | Maps device names to classes | Set to `{}` |
+| `devices:` key in `node.settings.yaml` | Required | Omit entirely |
+| Device instantiation loop in `startup_handler` | Required | Replace with a single log line |
+| Device close loop in `shutdown_handler` | Required | Replace with `pass` or a single log line |
+| Device field declarations on the Node class | Required | Omit |
+
+```python
+class HumanNodeConfig(
+    RestNodeConfig,
+    yaml_file=("settings.yaml", "node.settings.yaml"),
+):
+    DEVICE_CLASSES: ClassVar[dict] = {}  # no devices
+    # --- Node-specific operation parameters (add here when needed) ---
+
+
+class HumanNode(RestNode):
+    config: HumanNodeConfig = HumanNodeConfig()
+    config_model = HumanNodeConfig
+    # No device instance fields.
+
+    def startup_handler(self) -> None:
+        self.logger.log("HumanNode: startup complete")  # no devices to open
+
+    def shutdown_handler(self) -> None:
+        pass  # no devices to close
+```
+
+### Using `state_handler` to display information to the operator
+
+When the Node is paused, `node_state` is visible on the Squid Dashboard node card.
+Use it to tell the operator what to look at and what to do next.
+
+A common pattern is to store the most recent result reference in an instance variable,
+then expose it in `state_handler` only while paused:
+
+```python
+_last_datapoint_id: Optional[str] = None  # set by plot-generating actions
+
+def state_handler(self) -> dict[str, Any]:
+    self.node_state = {
+        "status": "waiting_for_approval" if self.node_status.paused else "idle",
+    }
+    if self.node_status.paused and self._last_datapoint_id:
+        self.node_state["last_plot_datapoint_id"] = self._last_datapoint_id
+        self.node_state["hint"] = (
+            f"Open .madsci/datapoints/ and find the file whose name starts with "
+            f"{self._last_datapoint_id[:8]}, then press Resume to proceed."
+        )
+```
+
+The action that generates the plot sets `self._last_datapoint_id` before calling `self.pause()`:
+
+```python
+@action
+def generate_plot(self, result: dict) -> dict:
+    # ... generate figure with matplotlib ...
+    datapoint_id = self.create_and_upload_file_datapoint(
+        file_path=tmp_path, label="my_plot"
+    )
+    self._last_datapoint_id = datapoint_id  # shown in state_handler while paused
+    return ActionSucceeded(json_result={"datapoint_id": datapoint_id})
+```
+
+### matplotlib in a container
+
+Containers have no display. Set the non-interactive backend **before** any other matplotlib import:
+
+```python
+import matplotlib
+matplotlib.use("Agg")  # must come before `import matplotlib.pyplot as plt`
+import matplotlib.pyplot as plt
+```
+
+Always call `plt.close(fig)` after saving to prevent memory leaks in long-running nodes.
+
+---
+
 ## Data Saving
 
 ### Automatic saving (via Workflow)
@@ -399,6 +493,13 @@ def calibrate_density(self, material_name: str) -> ActionSucceeded:
 
 These explicit saves are independent of the automatic `json_result` save. In this project, most actions only need `json_result` — explicit saving is rarely necessary.
 
+> **File naming in the Data Manager**
+>
+> Files saved via `create_and_upload_file_datapoint()` are stored under `.madsci/datapoints/` with a ULID-based filename, **not** the original filename. There is no folder hierarchy — all files sit flat in that directory.
+> To retrieve a specific file later, either:
+> - Record the returned `datapoint_id` in `json_result` (so it is searchable in the Data Manager), or
+> - Use the Data Manager REST API to query by `label` or ownership fields (`workflow_id`, `step_id`, etc.)
+
 ---
 
 ### Summary
@@ -409,3 +510,57 @@ These explicit saves are independent of the automatic `json_result` save. In thi
 | Save additional data with a custom label | `self.create_and_upload_value_datapoint(...)` |
 | Return a file | `return ActionSucceeded(files=Path("/path/to/file"))` |
 | Save a file with a custom label | `self.create_and_upload_file_datapoint(...)` |
+
+---
+
+## ExperimentNode（参考）
+
+> **注意：以下は動作確認未済の情報です。**
+
+### ExperimentNode とは
+
+`ExperimentNode` は実験ロジック（`ExperimentScript` 相当）を REST Node として公開するためのクラス。
+`start_server()` を呼ぶと REST サーバーとして起動し、`run_experiment()` メソッドが `action: run_experiment` として自動登録される。
+
+Workcell Manager からは通常の Node と全く同じに見えるため、ワークフロー YAML のステップから呼び出せる。
+
+### 通常の Node との対比
+
+| | 通常の Node（`RestNode` 継承） | ExperimentNode |
+|---|---|---|
+| 実装 | `modules/{name}/{name}.py` | `experiments/{name}.py` |
+| 起動 | `docker compose up` | `python experiments/xxx.py` |
+| Workcell から見た扱い | 同じ |同じ |
+| 用途 | 物理デバイスの制御 | 実験ロジックを Node として公開 |
+
+### ワークフロー YAML での呼び出し
+
+```yaml
+steps:
+  - name: Run Sub-Experiment
+    node: my_experiment_node_1        # ExperimentNode が起動しているサーバー名
+    action: run_experiment            # 固定でこの名前
+    use_parameters:
+      args:
+        material_name: material_name
+```
+
+### 複数ワークフローを一つにまとめる設計パターン
+
+複数のワークフローを順番に実行したい場合、`ExperimentScript` でループを書く代わりに、
+各ワークフローを `ExperimentNode` の Action として包み、それらを組み合わせた master workflow を作る設計も可能。
+
+```
+ExperimentScript （薄いラッパー）
+  └─ start_workflow("master.workflow.yaml")
+        ├─ step1: experiment_node_1.run_experiment(material="A")
+        │    └─ (内部で) start_workflow("calibration.yaml")
+        └─ step2: experiment_node_1.run_experiment(material="B")
+             └─ (内部で) start_workflow("calibration.yaml")
+```
+
+この構成が有効な場面：
+- 「次の材料をいつ開始するか」を Workcell Manager のスケジューラーに委ねたい場合
+- 複数の実験ラインを並列・依存関係ありで動かしたい場合
+
+今の規模（材料を順番にキャリブレーション）では `ExperimentScript` にループを書く方がシンプル。

@@ -35,6 +35,8 @@ applyTo: "**"
 
 | Concept | Granularity / Definition |
 |---|---|
+| **Campaign** | A group of Experiment Runs sharing the same experimental design. Managed by the Experiment Manager |
+| **Experiment Run** | One execution of an `ExperimentScript`. Submits one or more Workflows; records conditions and results |
 | **Workflow** | Split at **parallel execution or re-execution boundaries**. Each workflow is independently schedulable |
 | **Step** | The unit by which a Workflow invokes a Node Action. 1 Step = 1 Action call |
 | **Action** | Since **Workflows have no loop syntax**, any process requiring iteration must be fully encapsulated inside an Action. Defined per Node |
@@ -88,6 +90,15 @@ Workcell (automated experiment system)
 > The current `auto_calibration_lab` focuses on a single-node implementation
 > (`high_viscosity_liquid_weighing`) as a first step toward this architecture.
 
+The full execution stack top-to-bottom is:
+
+```
+experiments/{campaign_name}.py   ← ExperimentScript: loop / condition control
+  └── workflows/*.workflow.yaml  ← Workflow: step ordering
+        └── Node Action          ← REST API call to a Node
+              └── Device Command ← Physical instrument operation
+```
+
 ---
 
 ## File Management
@@ -99,6 +110,15 @@ Defines all services (managers, nodes, databases). Start the entire system with 
 
 **`settings.yaml`** — project root  
 Lab-wide configuration: manager URLs, node names, and Workcell node registration (`nodes:` key). Automatically discovered by walk-up file search.
+
+**`experiments/register_campaign.py`** — one-time setup script (run once per new campaign theme)  
+Registers an `ExperimentalCampaign` in the Experiment Manager and prints the generated `campaign_id`.
+Run before the first experiment run of a new campaign; copy the printed ID into the experiment script.
+> See `experiments.instructions.md` for the full pattern.
+
+**`experiments/{campaign_name}.py`** — one file per Experiment Run type  
+Subclasses `ExperimentScript` (from `madsci.experiment_application`). Defines the experiment loop: which workflows to submit, in what order, with what parameters. Also the entry point for autonomous / iterative experiments (e.g. active learning loops).  
+> See `experiments.instructions.md` for detailed rules.
 
 **`workflows/*.workflow.yaml`** — one file per Workflow  
 Workflow definitions. Naming: `{name}.workflow.yaml`.
@@ -174,3 +194,31 @@ Recorded automatically by the system.
 
 **Resource information (containers, reagents, etc.)** → Resource Manager (PostgreSQL)  
 Only relevant when the Resource Manager is in use.
+
+---
+
+## Campaign Execution Flow
+
+The typical flow from initial setup to running repeated experiments in this project.
+
+### Setup (first time only — manual)
+
+1. **Device check** — Run `notebooks/device_check.ipynb` or `notebooks/dispenser_check.ipynb` to verify all devices are responding correctly.
+2. **Resource registration** — Run `notebooks/material_management.ipynb` to register materials in the Resource Manager.
+3. **Campaign registration** *(optional)* — Run `experiments/register_campaign.py` to register an `ExperimentalCampaign` in the Experiment Manager and obtain a `campaign_id`. Required only when grouping multiple Experiment Runs under a named campaign.
+4. **Set campaign_id** *(optional)* — Copy the printed `campaign_id` into the experiment script's `ExperimentDesign(ownership_info=OwnershipInfo(campaign_id="..."))`.
+
+### Experiment Execution (repeat as needed)
+
+5. **Run experiment script** — `python experiments/{campaign_name}.py`
+
+### Review and Update (as needed)
+
+6. **Check results** — Review via notebooks or Swagger UI (Data Manager: http://localhost:8004/docs, Workcell Manager: http://localhost:8005/docs).
+7. **Update resources** — Update material calibration parameters etc. via `notebooks/material_management.ipynb`.
+8. **Repeat** — Return to step 5.
+
+### Notes
+
+- Steps 1–4 are one-time setup per new campaign theme. Steps 3–4 are optional if grouping is not needed.
+- The Location Manager (port 8006) is not used in the current project. It becomes necessary when robot arms or automated sample transfer are introduced.
