@@ -116,6 +116,8 @@ Registers an `ExperimentalCampaign` in the Experiment Manager and prints the gen
 Run before the first experiment run of a new campaign; copy the printed ID into the experiment script.
 > See `experiments.instructions.md` for the full pattern.
 
+> **⚠ MADSci 0.7.0 limitation:** The `ExperimentClient.register_campaign()` method exists on the client side, but the Experiment Manager server does not implement the corresponding `POST /campaign` endpoint in MADSci 0.7.0. Calling `register_campaign.py` will result in a `404 Not Found` error. Skip steps 3–4 until this is implemented in a future MADSci version.
+
 **`experiments/{campaign_name}.py`** — one file per Experiment Run type  
 Subclasses `ExperimentScript` (from `madsci.experiment_application`). Defines the experiment loop: which workflows to submit, in what order, with what parameters. Also the entry point for autonomous / iterative experiments (e.g. active learning loops).  
 > See `experiments.instructions.md` for detailed rules.
@@ -206,7 +208,9 @@ The typical flow from initial setup to running repeated experiments in this proj
 1. **Device check** — Run `notebooks/device_check.ipynb` or `notebooks/dispenser_check.ipynb` to verify all devices are responding correctly.
 2. **Resource registration** — Run `notebooks/material_management.ipynb` to register materials in the Resource Manager.
 3. **Campaign registration** *(optional)* — Run `experiments/register_campaign.py` to register an `ExperimentalCampaign` in the Experiment Manager and obtain a `campaign_id`. Required only when grouping multiple Experiment Runs under a named campaign.
+   > **⚠ MADSci 0.7.0 limitation:** `POST /campaign` is not implemented on the server. This step will fail with `404 Not Found`. Skip until a future MADSci version adds server-side support.
 4. **Set campaign_id** *(optional)* — Copy the printed `campaign_id` into the experiment script's `ExperimentDesign(ownership_info=OwnershipInfo(campaign_id="..."))`.
+   > **⚠ MADSci 0.7.0 limitation:** Same as step 3 — not usable until the server-side endpoint is implemented.
 
 ### Experiment Execution (repeat as needed)
 

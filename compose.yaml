@@ -83,6 +83,12 @@ services:
       - "8000:8000"
     environment:
       - LAB_SERVER_URL=http://0.0.0.0:8000/
+      - EVENT_SERVER_URL=http://event_manager:8001/
+      - EXPERIMENT_SERVER_URL=http://experiment_manager:8002/
+      - RESOURCE_SERVER_URL=http://resource_manager:8003/
+      - DATA_SERVER_URL=http://data_manager:8004/
+      - WORKCELL_SERVER_URL=http://workcell_manager:8005/
+      - LOCATION_SERVER_URL=http://location_manager:8006/
 
   event_manager:
     <<: *madsci-service
@@ -156,6 +162,7 @@ services:
       - WORKCELL_REDIS_HOST=madsci_redis
       - EVENT_SERVER_URL=http://event_manager:8001/
       - RESOURCE_SERVER_URL=http://resource_manager:8003/
+      - DATA_SERVER_URL=http://data_manager:8004/
       - LOCATION_SERVER_URL=http://location_manager:8006/
       # Override workcell_nodes from settings.yaml with Docker-internal service names
       # NOTE: Update this list every time a new node service is added.
@@ -211,6 +218,7 @@ services:
       - NODE_URL=http://0.0.0.0:2001/
       - EVENT_SERVER_URL=http://event_manager:8001/
       - RESOURCE_SERVER_URL=http://resource_manager:8003/
+      - DATA_SERVER_URL=http://data_manager:8004/
 
 networks:
   madsci_net:

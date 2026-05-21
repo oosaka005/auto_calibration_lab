@@ -64,6 +64,19 @@ interface_type: fake   # "fake" (simulated) or "real" (hardware). Default: "real
 
 ---
 
+## Compose Environment Check
+
+After creating or modifying a node, inspect the node implementation and update that node's `environment:` block in `compose.yaml`.
+
+Rules:
+- Always include `EVENT_SERVER_URL=http://event_manager:8001/`
+- Include `RESOURCE_SERVER_URL=http://resource_manager:8003/` if the node uses resources, resource clients, or resource definitions
+- Include `DATA_SERVER_URL=http://data_manager:8004/` if the node creates or reads datapoints, files, plots, workflow outputs, or feed-forward data
+- Add other manager URLs only if the node explicitly uses those clients
+- Confirm `WORKCELL_NODES` in `workcell_manager` includes the node service name and Docker-internal URL
+
+---
+
 ## Config Class
 
 - Inherits from `RestNodeConfig`
@@ -513,54 +526,57 @@ These explicit saves are independent of the automatic `json_result` save. In thi
 
 ---
 
-## ExperimentNode（参考）
+## ExperimentNode Reference
 
-> **注意：以下は動作確認未済の情報です。**
+> **Note:** This section is reference guidance. Confirm behavior in the current MADSci version before using this pattern in production.
 
-### ExperimentNode とは
+### What ExperimentNode Is
 
-`ExperimentNode` は実験ロジック（`ExperimentScript` 相当）を REST Node として公開するためのクラス。
-`start_server()` を呼ぶと REST サーバーとして起動し、`run_experiment()` メソッドが `action: run_experiment` として自動登録される。
+`ExperimentNode` exposes experiment logic, similar to an `ExperimentScript`, as a REST Node.
+When `start_server()` is called, it starts a REST server and registers `run_experiment()` as the `run_experiment` action.
 
-Workcell Manager からは通常の Node と全く同じに見えるため、ワークフロー YAML のステップから呼び出せる。
+From the Workcell Manager's perspective, an `ExperimentNode` can be called from workflow YAML like a normal node.
 
-### 通常の Node との対比
+### Comparison with Normal Nodes
 
-| | 通常の Node（`RestNode` 継承） | ExperimentNode |
+| Item | Normal Node (`RestNode`) | ExperimentNode |
 |---|---|---|
-| 実装 | `modules/{name}/{name}.py` | `experiments/{name}.py` |
-| 起動 | `docker compose up` | `python experiments/xxx.py` |
-| Workcell から見た扱い | 同じ |同じ |
-| 用途 | 物理デバイスの制御 | 実験ロジックを Node として公開 |
+| Implementation location | `modules/{name}/{name}.py` | `experiments/{name}.py` |
+| Startup | `docker compose up` | `python experiments/xxx.py` |
+| Workcell handling | Normal node | Normal node |
+| Main use | Physical device control | Expose experiment logic as a node |
 
-### ワークフロー YAML での呼び出し
+### Calling from Workflow YAML
 
 ```yaml
 steps:
   - name: Run Sub-Experiment
-    node: my_experiment_node_1        # ExperimentNode が起動しているサーバー名
-    action: run_experiment            # 固定でこの名前
+    node: my_experiment_node_1
+    action: run_experiment
     use_parameters:
       args:
         material_name: material_name
 ```
 
-### 複数ワークフローを一つにまとめる設計パターン
+### Master Workflow Pattern
 
-複数のワークフローを順番に実行したい場合、`ExperimentScript` でループを書く代わりに、
-各ワークフローを `ExperimentNode` の Action として包み、それらを組み合わせた master workflow を作る設計も可能。
+If multiple workflows need to run in sequence, an alternative to writing a loop in an `ExperimentScript` is:
+- wrap each workflow as an `ExperimentNode` action
+- call those actions from a master workflow
 
+Example structure:
+
+```text
+ExperimentScript as a thin wrapper
+  start_workflow("master.workflow.yaml")
+    step 1: experiment_node_1.run_experiment(material="A")
+      internally starts "calibration.yaml"
+    step 2: experiment_node_1.run_experiment(material="B")
+      internally starts "calibration.yaml"
 ```
-ExperimentScript （薄いラッパー）
-  └─ start_workflow("master.workflow.yaml")
-        ├─ step1: experiment_node_1.run_experiment(material="A")
-        │    └─ (内部で) start_workflow("calibration.yaml")
-        └─ step2: experiment_node_1.run_experiment(material="B")
-             └─ (内部で) start_workflow("calibration.yaml")
-```
 
-この構成が有効な場面：
-- 「次の材料をいつ開始するか」を Workcell Manager のスケジューラーに委ねたい場合
-- 複数の実験ラインを並列・依存関係ありで動かしたい場合
+This pattern can be useful when:
+- the Workcell Manager should decide when the next material starts
+- multiple experimental lines need to run with scheduling or dependency control
 
-今の規模（材料を順番にキャリブレーション）では `ExperimentScript` にループを書く方がシンプル。
+For this project's current calibration campaign, a loop in `ExperimentScript` is simpler than introducing `ExperimentNode`.

@@ -4,9 +4,9 @@ metadata:
   description: >
     Full dispenser calibration and gravimetric accuracy test with human-in-the-loop review.
     Step 1: Calibrate dispenser across a speed range.
-    Step 2: Generate calibration plot → operator reviews → save to Resource Manager.
+    Step 2: Generate calibration plot -> operator reviews.
     Step 3: Dispense to multiple target masses using calibrated parameters.
-    Step 4: Generate dispense accuracy parity plot → operator reviews.
+    Step 4: Generate dispense accuracy parity plot -> operator reviews.
   version: 1.0
 
 parameters:
@@ -60,16 +60,7 @@ steps:
     key: wait_for_approval_1
     node: human_node_1
     action: wait_for_approval
-    description: "Operator: review the calibration plot, then press Resume to save results."
-
-  - name: Save Calibration to Resource Manager
-    key: save_calibration_to_resource
-    node: human_node_1
-    action: save_calibration_to_resource
-    description: "Saves throughput/accuracy to Resource Manager. Then proceed to dispense test."
-    use_parameters:
-      args:
-        calibration_result: calibration_result
+    description: "Operator: review the calibration plot, then press Resume to proceed to the dispense test."
 
   - name: Dispense Accuracy Test (Batch)
     key: dispense_batch

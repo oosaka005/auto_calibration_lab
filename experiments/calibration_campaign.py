@@ -36,17 +36,17 @@ DEFAULT_TARGET_MASSES_G = [0.010, 0.032, 0.100, 0.316, 1.000]
 # Add / remove entries to run a multi-material campaign.
 MATERIALS_TO_CALIBRATE = [
     {
-        "material_name": "エポキシ樹脂A",       # Must match resource_name in Resource Manager
+        "material_name": "Siltech F-60,000",       # Must match resource_name in Resource Manager
         "pressure_mpa": 0.1,
         "volume_per_step_ml": 1.0,
         "speed_start_ml_per_min": 1.0,
-        "speed_end_ml_per_min": 10.0,
+        "speed_end_ml_per_min": 6.0,
         "speed_step_ml_per_min": 1.0,
         "target_masses_g": DEFAULT_TARGET_MASSES_G,
     },
     # Add more materials here, e.g.:
     # {
-    #     "material_name": "硬化剤B",
+    #     "material_name": "HardenerB",
     #     "pressure_mpa": 0.1,
     #     "volume_per_step_ml": 1.0,
     #     "speed_start_ml_per_min": 1.0,
@@ -134,4 +134,4 @@ if __name__ == "__main__":
     #       workcell_server_url="http://localhost:8005",
     #       experiment_server_url="http://localhost:8002",
     #   ).run()
-    CalibrationCampaign().run()
+    CalibrationCampaign.main()
