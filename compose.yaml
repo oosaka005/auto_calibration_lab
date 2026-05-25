@@ -1,7 +1,7 @@
 # Auto Calibration Lab - Docker Compose
 #
 # Usage:
-#   docker compose up -d --build
+#   docker compose up -d
 #
 # Infrastructure (MongoDB, PostgreSQL) is included below.
 # Credentials are set to defaults (madsci/madsci) — change for production use.
@@ -69,7 +69,7 @@ services:
   lab_manager:
     <<: *madsci-service
     container_name: lab_manager
-    image: ghcr.io/ad-sdl/madsci_dashboard:latest
+    image: ghcr.io/ad-sdl/madsci_dashboard:0.7.0
     command: python -m madsci.squid.lab_server
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -83,12 +83,6 @@ services:
       - "8000:8000"
     environment:
       - LAB_SERVER_URL=http://0.0.0.0:8000/
-      - EVENT_SERVER_URL=http://event_manager:8001/
-      - EXPERIMENT_SERVER_URL=http://experiment_manager:8002/
-      - RESOURCE_SERVER_URL=http://resource_manager:8003/
-      - DATA_SERVER_URL=http://data_manager:8004/
-      - WORKCELL_SERVER_URL=http://workcell_manager:8005/
-      - LOCATION_SERVER_URL=http://location_manager:8006/
 
   event_manager:
     <<: *madsci-service

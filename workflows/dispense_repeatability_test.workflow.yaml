@@ -1,0 +1,54 @@
+name: dispense_repeatability_test
+
+metadata:
+  description: >
+    Dispense each target mass repeatedly and generate a review plot showing
+    measured masses, per-repeat error percent, and summary CV percent.
+  version: 1.0
+
+parameters:
+  json_inputs:
+    - key: material_name
+      description: Name of the material registered in the Resource Manager
+    - key: pressure_mpa
+      description: Operating pressure [MPa]
+    - key: target_masses_g
+      description: "List of target masses for repeatability test [g], e.g. [0.01, 0.032, 0.1]"
+    - key: repeat_count
+      description: Number of repeated dispenses per target mass
+    - key: pause_between_repeats_s
+      description: Optional wait time between repeated dispenses [s]
+      default: 0.0
+  feed_forward:
+    - key: repeatability_result
+      step: evaluate_dispense_repeatability
+      data_type: json
+
+steps:
+  - name: Evaluate Dispense Repeatability
+    key: evaluate_dispense_repeatability
+    node: high_viscosity_liquid_weighing_1
+    action: evaluate_dispense_repeatability
+    description: "Dispenses each target mass repeat_count times and returns raw measured masses."
+    use_parameters:
+      args:
+        material_name: material_name
+        pressure_mpa: pressure_mpa
+        target_masses_g: target_masses_g
+        repeat_count: repeat_count
+        pause_between_repeats_s: pause_between_repeats_s
+
+  - name: Generate Dispense Repeatability Plot
+    key: generate_dispense_repeatability_plot
+    node: human_node_1
+    action: generate_dispense_repeatability_plot
+    description: "Generates measured-mass plot plus raw and summary tables, then saves to Data Manager."
+    use_parameters:
+      args:
+        repeatability_result: repeatability_result
+
+  - name: Wait for Repeatability Review
+    key: wait_for_approval
+    node: human_node_1
+    action: wait_for_approval
+    description: "Operator: review the repeatability plot, then press Resume to complete the workflow."

@@ -1,6 +1,7 @@
 """Human-in-the-loop node for operator review and approval steps."""
 
 import logging
+import statistics
 import tempfile
 import time
 from datetime import datetime
@@ -453,6 +454,255 @@ class HumanNode(RestNode):
                 "material_name": material_name,
                 "pressure_mpa": pressure_mpa,
                 "n_points": len(dispense_results),
+            })
+        except Exception as e:
+            return ActionFailed(errors=[e])
+
+    @action
+    def generate_dispense_repeatability_plot(self, repeatability_result: dict) -> dict:
+        """Generate a review plot for dispense repeatability results.
+
+        The plot shows each measured mass as grouped bars by target mass.
+        Mean error percent is shown on the secondary axis. Tables below the
+        plot show per-repeat results and summary metrics: mean error percent,
+        CV percent, and average elapsed time.
+        """
+        try:
+            import matplotlib.gridspec as gridspec
+
+            material_name = repeatability_result.get("material_name", "unknown")
+            pressure_mpa = repeatability_result.get("pressure_mpa", "?")
+            repeat_count = repeatability_result.get("repeat_count", "?")
+            results = repeatability_result.get("results", [])
+            if not results:
+                return ActionFailed(errors=[ValueError("repeatability_result contains no results.")])
+
+            target_masses = repeatability_result.get("target_masses_g")
+            if not target_masses:
+                target_masses = sorted({float(r["target_mass_g"]) for r in results})
+            target_masses = [float(target_mass_g) for target_mass_g in target_masses]
+
+            grouped = {}
+            for target_mass_g in target_masses:
+                grouped[target_mass_g] = [
+                    r for r in results
+                    if float(r["target_mass_g"]) == target_mass_g
+                    and r.get("measured_mass_g") is not None
+                ]
+
+            summary_rows = []
+            raw_rows = []
+            for target_mass_g in target_masses:
+                rows = grouped[target_mass_g]
+                masses = [float(r["measured_mass_g"]) for r in rows]
+                if not masses:
+                    continue
+                mean_mass_g = statistics.fmean(masses)
+                stdev_mass_g = statistics.stdev(masses) if len(masses) > 1 else 0.0
+                mean_error_percent = statistics.fmean(
+                    [(mass_g - target_mass_g) / target_mass_g * 100.0 for mass_g in masses]
+                )
+                elapsed_values = [
+                    float(r.get("elapsed_s", 0.0))
+                    for r in rows
+                    if r.get("elapsed_s") is not None
+                ]
+                mean_elapsed_s = statistics.fmean(elapsed_values) if elapsed_values else None
+                cv_percent = (
+                    stdev_mass_g / abs(mean_mass_g) * 100.0
+                    if mean_mass_g != 0
+                    else None
+                )
+                summary_rows.append([
+                    f"{target_mass_g:g}",
+                    str(len(masses)),
+                    f"{mean_mass_g:.5g}",
+                    f"{mean_error_percent:+.2f}",
+                    f"{cv_percent:.2f}" if cv_percent is not None else "n/a",
+                    f"{mean_elapsed_s:.1f}" if mean_elapsed_s is not None else "n/a",
+                ])
+                for r in rows:
+                    measured_mass_g = float(r["measured_mass_g"])
+                    error_percent = (measured_mass_g - target_mass_g) / target_mass_g * 100.0
+                    raw_rows.append([
+                        f"{target_mass_g:g}",
+                        str(r.get("repeat_index", "")),
+                        f"{measured_mass_g:.5g}",
+                        f"{error_percent:+.2f}",
+                        f"{float(r.get('elapsed_s', 0.0)):.1f}" if r.get("elapsed_s") is not None else "n/a",
+                    ])
+
+            if not summary_rows:
+                return ActionFailed(errors=[ValueError("No valid measured_mass_g values found.")])
+
+            plot_height = 4.8
+            summary_table_height = max(1.0, 0.32 * (len(summary_rows) + 1))
+            raw_table_height = max(1.8, 0.24 * (len(raw_rows) + 1))
+            fig_height = plot_height + summary_table_height + raw_table_height + 1.2
+            fig = plt.figure(figsize=(10, fig_height))
+            gs = gridspec.GridSpec(
+                3, 1,
+                height_ratios=[plot_height, summary_table_height, raw_table_height],
+                hspace=0.55,
+            )
+
+            ax = fig.add_subplot(gs[0])
+            ax_error = ax.twinx()
+            x_positions = np.arange(len(target_masses), dtype=float)
+            max_repeats = max(len(grouped[target_mass_g]) for target_mass_g in target_masses)
+            bar_width = min(0.18, 0.72 / max(max_repeats, 1))
+            measured_color = "#6baed6"
+            target_color = "#333333"
+            error_color = "#cc3311"
+
+            all_masses = [
+                float(r["measured_mass_g"])
+                for target_mass_g in target_masses
+                for r in grouped[target_mass_g]
+                if r.get("measured_mass_g") is not None
+            ]
+            mean_error_percents = []
+            use_log_y = (
+                all(mass_g > 0 for mass_g in all_masses + target_masses)
+                and max(all_masses + target_masses) / min(all_masses + target_masses) > 20
+            )
+            bar_bottom = min(all_masses + target_masses) * 0.5 if use_log_y else 0.0
+
+            for x_pos, target_mass_g in zip(x_positions, target_masses):
+                rows = sorted(grouped[target_mass_g], key=lambda r: r.get("repeat_index", 0))
+                masses = [float(r["measured_mass_g"]) for r in rows]
+                if not masses:
+                    continue
+                offsets = (
+                    (np.arange(len(masses)) - (len(masses) - 1) / 2.0) * bar_width
+                )
+                ax.bar(
+                    x_pos + offsets,
+                    [mass_g - bar_bottom for mass_g in masses],
+                    width=bar_width * 0.88,
+                    bottom=bar_bottom,
+                    color=measured_color,
+                    edgecolor="white",
+                    linewidth=0.8,
+                    alpha=0.9,
+                    label="Measured mass" if x_pos == 0 else None,
+                )
+                ax.hlines(
+                    target_mass_g,
+                    x_pos - 0.42,
+                    x_pos + 0.42,
+                    color=target_color,
+                    linestyle="--",
+                    linewidth=1.8,
+                    zorder=4,
+                    label="Target mass" if x_pos == 0 else None,
+                )
+                mean_error_percent = statistics.fmean(
+                    [(mass_g - target_mass_g) / target_mass_g * 100.0 for mass_g in masses]
+                )
+                mean_error_percents.append(mean_error_percent)
+                ax_error.plot(
+                    [x_pos],
+                    [mean_error_percent],
+                    color=error_color,
+                    marker="o",
+                    markersize=7,
+                    linestyle="None",
+                    zorder=6,
+                    label="Mean error [%]" if x_pos == 0 else None,
+                )
+                ax_error.annotate(
+                    f"{mean_error_percent:+.2f}%",
+                    xy=(x_pos, mean_error_percent),
+                    xytext=(6, 0),
+                    textcoords="offset points",
+                    va="center",
+                    ha="left",
+                    fontsize=8,
+                    color=error_color,
+                    zorder=7,
+                )
+
+            if use_log_y:
+                ax.set_yscale("log")
+
+            ax_error.axhline(0.0, color=error_color, linestyle="--", linewidth=1.0, alpha=0.5)
+            max_abs_mean_error = max(abs(v) for v in mean_error_percents) if mean_error_percents else 1.0
+            error_limit = max(1.0, max_abs_mean_error * 1.25)
+            ax_error.set_ylim(-error_limit, error_limit)
+            ax.set_xticks(x_positions)
+            ax.set_xticklabels([f"{target_mass_g:g}" for target_mass_g in target_masses])
+            ax.set_xlabel("Target mass [g]", fontsize=11)
+            ax.set_ylabel("Measured mass [g]", fontsize=11)
+            ax_error.set_ylabel("Mean error [%]", fontsize=11, color=error_color)
+            ax_error.tick_params(axis="y", colors=error_color)
+            ax.set_title(
+                f"Dispense Repeatability - {material_name} ({pressure_mpa} MPa, n={repeat_count})",
+                fontsize=12,
+                fontweight="bold",
+            )
+            ax.grid(True, axis="y", alpha=0.25)
+            lines1, labels1 = ax.get_legend_handles_labels()
+            lines2, labels2 = ax_error.get_legend_handles_labels()
+            ax.legend(lines1 + lines2, labels1 + labels2, loc="best", fontsize=9)
+
+            ax_summary = fig.add_subplot(gs[1])
+            ax_summary.axis("off")
+            summary_labels = [
+                "Target [g]",
+                "n",
+                "Mean measured [g]",
+                "Mean error [%]",
+                "CV [%]",
+                "Avg time [s]",
+            ]
+            summary_table = ax_summary.table(
+                cellText=summary_rows,
+                colLabels=summary_labels,
+                loc="center",
+                cellLoc="center",
+                bbox=[0.0, 0.0, 1.0, 1.0],
+            )
+            summary_table.auto_set_font_size(False)
+            summary_table.set_fontsize(9)
+            for col in range(len(summary_labels)):
+                summary_table[(0, col)].set_facecolor("#cce0ff")
+                summary_table[(0, col)].set_text_props(fontweight="bold")
+
+            ax_raw = fig.add_subplot(gs[2])
+            ax_raw.axis("off")
+            raw_labels = ["Target [g]", "Repeat", "Measured [g]", "Error [%]", "Time [s]"]
+            raw_table = ax_raw.table(
+                cellText=raw_rows,
+                colLabels=raw_labels,
+                loc="center",
+                cellLoc="center",
+                bbox=[0.0, 0.0, 1.0, 1.0],
+            )
+            raw_table.auto_set_font_size(False)
+            raw_font_size = 8 if len(raw_rows) <= 30 else 7
+            raw_table.set_fontsize(raw_font_size)
+            for col in range(len(raw_labels)):
+                raw_table[(0, col)].set_facecolor("#e6e6e6")
+                raw_table[(0, col)].set_text_props(fontweight="bold")
+
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+                plot_path = Path(f.name)
+            fig.savefig(plot_path, dpi=150, bbox_inches="tight")
+            plt.close(fig)
+
+            datapoint_id = self.create_and_upload_file_datapoint(
+                file_path=plot_path,
+                label="dispense_repeatability_plot",
+            )
+            plot_path.unlink()
+            self._last_datapoint_id = datapoint_id
+
+            return ActionSucceeded(json_result={
+                "datapoint_id": datapoint_id,
+                "material_name": material_name,
+                "pressure_mpa": pressure_mpa,
+                "n_points": len(raw_rows),
             })
         except Exception as e:
             return ActionFailed(errors=[e])

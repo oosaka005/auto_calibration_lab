@@ -7,14 +7,15 @@ applyTo: "compose.yaml"
 
 ## Startup Command
 
-Always use `--build` when starting services:
+Use the normal startup command for day-to-day operation:
 
 ```bash
-docker compose up -d --build
+docker compose up -d
 ```
 
-- `--build` rebuilds the image only when `Dockerfile` or `devices/requirements.txt` has changed.
-- After the first `docker compose up -d --build`, containers auto-restart on PC reboot because services use `restart: unless-stopped`.
+- Use `--build` only after changing `Dockerfile`, `devices/requirements.txt`, or other image-level dependencies.
+- Python files, workflow YAML, notebooks, and settings are mounted into the containers by `volumes:`, so they usually require only `docker compose up -d` or `docker compose restart <service>`.
+- After startup, containers auto-restart on PC reboot because services use `restart: unless-stopped`.
 - Use `docker compose down` only when intentionally stopping the system.
 
 ## What Must NOT Be Changed
@@ -58,6 +59,8 @@ x-madsci-service: &madsci-service
 
 Each manager/node service uses `<<: *madsci-service` to inherit this configuration.
 Do not repeat inherited settings unless the service has a real override.
+
+If a service uses a prebuilt external image with application assets, do not rebuild that image with this project's Dockerfile unless the Dockerfile is intentionally based on that external image. In particular, `lab_manager` uses `ghcr.io/ad-sdl/madsci_dashboard:latest` because it must include the Squid Dashboard static UI files. If `lab_manager` ever needs a custom image, create a dedicated Dockerfile that starts from `ghcr.io/ad-sdl/madsci_dashboard:latest`, not from `ghcr.io/ad-sdl/madsci:latest`.
 
 A named bridge network must be declared:
 
@@ -127,7 +130,7 @@ Use this table when creating or editing manager services.
 
 | Service | Required environment |
 |---------|----------------------|
-| `lab_manager` | `LAB_SERVER_URL=http://0.0.0.0:8000/`, `EVENT_SERVER_URL=http://event_manager:8001/`, `EXPERIMENT_SERVER_URL=http://experiment_manager:8002/`, `RESOURCE_SERVER_URL=http://resource_manager:8003/`, `DATA_SERVER_URL=http://data_manager:8004/`, `WORKCELL_SERVER_URL=http://workcell_manager:8005/`, `LOCATION_SERVER_URL=http://location_manager:8006/` |
+| `lab_manager` | `LAB_SERVER_URL=http://0.0.0.0:8000/` |
 | `event_manager` | `EVENT_SERVER_URL=http://0.0.0.0:8001/`, `EVENT_MONGO_DB_URL=mongodb://madsci_mongodb:27017/` |
 | `experiment_manager` | `EXPERIMENT_SERVER_URL=http://0.0.0.0:8002/`, `EXPERIMENT_MONGO_DB_URL=mongodb://madsci_mongodb:27017/`, `EVENT_SERVER_URL=http://event_manager:8001/` |
 | `resource_manager` | `RESOURCE_SERVER_URL=http://0.0.0.0:8003/`, `RESOURCE_DB_URL=postgresql://madsci:madsci@madsci_postgres:5432/madsci_resources`, `EVENT_SERVER_URL=http://event_manager:8001/` |
@@ -208,7 +211,10 @@ Do not put these in `.env`:
 - Redis hosts
 - `localhost` URLs for container services
 
-## Lab Health Checks
+## Lab Dashboard Context
 
-The Lab Health panel sends health-check requests from inside the `lab_manager` container.
-Manager URLs used by `lab_manager` must use Docker service names, not `localhost`.
+Do not set manager URLs such as `WORKCELL_SERVER_URL=http://workcell_manager:8005/` on `lab_manager`.
+
+The Squid Dashboard frontend reads `/context` from `lab_manager`, then the user's browser calls the returned manager URLs directly. Because the browser runs on the host PC, `/context` must expose host-reachable URLs from `settings.yaml` such as `http://localhost:8005/`, not Docker-internal service names such as `http://workcell_manager:8005/`.
+
+Docker-internal manager URLs are still correct for services that call each other inside the Compose network, such as `workcell_manager`, nodes, and data/resource clients.
