@@ -600,6 +600,72 @@ class HighViscosityLiquidWeighingNode(RestNode):
             "dispense_results": dispense_results,
         })
 
+    @action
+    def evaluate_dispense_repeatability(
+        self,
+        material_name: str,
+        pressure_mpa: float,
+        target_masses_g: list,
+        repeat_count: int,
+        pause_between_repeats_s: float = 0.0,
+    ) -> dict:
+        """Dispense each target mass repeatedly and return raw measured masses.
+
+        This action evaluates end-to-end dispensing repeatability by reusing the
+        standard dispense action. The returned json_result intentionally contains
+        raw results only; summary statistics are calculated in the review plot.
+        """
+        if repeat_count < 2:
+            return ActionFailed(errors=[ValueError("repeat_count must be at least 2.")])
+        if not target_masses_g:
+            return ActionFailed(errors=[ValueError("target_masses_g must not be empty.")])
+        if pause_between_repeats_s < 0:
+            return ActionFailed(errors=[ValueError("pause_between_repeats_s must be non-negative.")])
+
+        try:
+            targets = [float(target_mass_g) for target_mass_g in target_masses_g]
+        except Exception as e:
+            return ActionFailed(errors=[ValueError(f"target_masses_g must contain numbers: {e}")])
+        if any(target_mass_g <= 0 for target_mass_g in targets):
+            return ActionFailed(errors=[ValueError("All target masses must be positive.")])
+
+        results = []
+        try:
+            for target_mass_g in targets:
+                for repeat_index in range(1, repeat_count + 1):
+                    self._checkpoint()
+                    t_start = time.monotonic()
+                    result = self.dispense(
+                        material_name=material_name,
+                        target_mass_g=target_mass_g,
+                        pressure_mpa=pressure_mpa,
+                    )
+                    elapsed_s = round(time.monotonic() - t_start, 2)
+                    if hasattr(result, "errors") and result.errors:
+                        return ActionFailed(errors=result.errors)
+
+                    jr = result.json_result or {}
+                    results.append({
+                        "target_mass_g": target_mass_g,
+                        "repeat_index": repeat_index,
+                        "measured_mass_g": jr.get("measured_mass_g"),
+                        "elapsed_s": elapsed_s,
+                    })
+
+                    if pause_between_repeats_s > 0 and repeat_index < repeat_count:
+                        time.sleep(pause_between_repeats_s)
+
+            return ActionSucceeded(json_result={
+                "material_name": material_name,
+                "pressure_mpa": pressure_mpa,
+                "target_masses_g": targets,
+                "repeat_count": repeat_count,
+                "pause_between_repeats_s": pause_between_repeats_s,
+                "results": results,
+            })
+        except Exception as e:
+            return ActionFailed(errors=[e])
+
 
 if __name__ == "__main__":
     node = HighViscosityLiquidWeighingNode()

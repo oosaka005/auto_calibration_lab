@@ -1,4 +1,4 @@
-FROM ghcr.io/ad-sdl/madsci:latest
+FROM ghcr.io/ad-sdl/madsci:0.7.0
 
 # Install hardware-specific libraries required by real device interfaces.
 # Must install into the MADSci virtualenv (/home/madsci/MADSci/.venv)
